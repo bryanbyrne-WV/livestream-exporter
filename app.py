@@ -5,7 +5,7 @@ import re
 import time
 import zipfile
 from dataclasses import dataclass
-from datetime import date, datetime, time as dt_time
+from datetime import datetime, time as dt_time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -414,10 +414,7 @@ def fetch_livestreams(
     take: int,
 ) -> dict[str, Any]:
     url = f"{config.api_base_url.rstrip('/')}/livestreams"
-    params = {
-        "skip": skip,
-        "take": take,
-    }
+    params = {"skip": skip, "take": take}
 
     response = session.get(url, params=params, timeout=config.request_timeout)
 
@@ -459,9 +456,7 @@ def collect_all_livestreams(
             break
 
         collected.extend(livestreams)
-        status_box.info(
-            f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})"
-        )
+        status_box.info(f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})")
 
         next_page = get_next_page(payload)
         if next_page is None:
@@ -502,7 +497,6 @@ def export_selected_livestreams_to_zip(
             timestamp = row["started_at"] or row["created_at"]
 
             status_box.info(f"Exporting {item_index}/{total}: {title or livestream_id}")
-
             row = dict(row)
 
             if not recording_url:
@@ -611,6 +605,11 @@ def apply_global_branding():
                 );
             }
 
+            section[data-testid="stSidebar"] {
+                background: rgba(255,255,255,0.82);
+                backdrop-filter: blur(6px);
+            }
+
             .main-title {
                 font-size: 2.2rem;
                 color: #5A3EA6;
@@ -623,11 +622,6 @@ def apply_global_branding():
                 color: #6B56B0;
                 opacity: 0.9;
                 margin-bottom: 1.2rem;
-            }
-
-            section[data-testid="stSidebar"] {
-                background: rgba(255,255,255,0.78);
-                backdrop-filter: blur(6px);
             }
 
             .wv-note {
@@ -667,63 +661,63 @@ def render_login_screen():
                 );
             }
 
-            .login-card {
-                background: rgba(255,255,255,0.92);
-                border: 1px solid rgba(90, 62, 166, 0.10);
-                border-radius: 24px;
-                box-shadow: 0 18px 40px rgba(60, 79, 168, 0.12);
-                padding: 2rem 2rem 1.6rem 2rem;
-                margin-top: 3rem;
-            }
-
-            .login-logo {
-                text-align: center;
-                margin-bottom: 0.5rem;
-                background: transparent !important;
-                box-shadow: none !important;
-                border: none !important;
+            .login-wrapper {
+                max-width: 420px;
+                margin: 1.5rem auto 2rem auto;
             }
 
             .login-title {
                 font-size: 2rem;
                 color: #5A3EA6;
                 font-weight: 700;
-                margin-bottom: 0.35rem;
-                margin-top: 0.4rem;
+                margin-bottom: 0.4rem;
+                margin-top: 1rem;
                 text-align: center;
             }
 
             .login-note {
-                font-size: 1.02rem;
+                font-size: 1.05rem;
                 color: #6B56B0;
-                opacity: 0.85;
-                margin-bottom: 1.6rem;
+                opacity: 0.8;
+                margin-bottom: 2.2rem;
                 text-align: center;
+            }
+
+            .underline-input input {
+                background: transparent !important;
+                border: none !important;
+                border-bottom: 1px solid #8368D8 !important;
+                border-radius: 0 !important;
+                color: #4A2F8A !important;
+                padding: 0.6rem 0 !important;
+                font-size: 1.05rem;
+                box-shadow: none !important;
+            }
+
+            .underline-input input::placeholder {
+                color: #9A84DD !important;
+                opacity: 0.6;
             }
 
             .blue-btn button {
                 width: 100%;
                 background-color: #3C4FA8 !important;
                 color: white !important;
-                border-radius: 10px !important;
+                border-radius: 8px !important;
                 height: 3rem;
                 font-weight: 600;
-                letter-spacing: 0.4px;
+                letter-spacing: 0.5px;
                 border: none !important;
-                margin-top: 1.1rem;
+                margin-top: 1.8rem;
             }
 
             .request-button {
                 display: inline-block;
-                margin-top: 1.2rem;
+                margin-top: 1.6rem;
                 font-size: 0.95rem;
                 color: #3C4FA8 !important;
                 text-decoration: underline;
-                opacity: 0.9;
-            }
-
-            .request-wrapper {
-                text-align: center;
+                opacity: 0.85;
             }
 
             div[data-testid="stTextInput"] label p {
@@ -735,57 +729,54 @@ def render_login_screen():
         unsafe_allow_html=True,
     )
 
-    _, center, _ = st.columns([1.2, 1.6, 1.2])
+    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
 
-    with center:
-        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="text-align:center; margin-bottom:10px;">
+            <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png" style="height:170px;">
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.markdown(
-            """
-            <div class="login-logo">
-                <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png" style="height:110px;">
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
+        unsafe_allow_html=True,
+    )
 
-        st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
-            unsafe_allow_html=True,
-        )
+    st.markdown('<div class="underline-input">', unsafe_allow_html=True)
+    username = st.text_input("Username", placeholder="Username", key="login_username")
+    password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        username = st.text_input("Username", placeholder="Username", key="login_username")
-        password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
+    st.checkbox("Remember me", disabled=True, key="remember_me")
 
-        st.checkbox("Remember me", disabled=True, key="remember_me")
+    st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
+    login_button = st.button("LOGIN", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
-        login_button = st.button("LOGIN", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    if login_button:
+        if username == admin_username and password == admin_password:
+            st.session_state.authenticated = True
+            st.success("Logged in!")
+            st.rerun()
+        else:
+            st.error("❌ Invalid username or password.")
 
-        if login_button:
-            if username == admin_username and password == admin_password:
-                st.session_state.authenticated = True
-                st.success("Logged in!")
-                st.rerun()
-            else:
-                st.error("❌ Invalid username or password.")
+    st.markdown(
+        """
+        <a class="request-button"
+           href="https://support.workvivo.com/hc/en-gb/requests/new"
+           target="_blank">
+            Request Access
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.markdown(
-            """
-            <div class="request-wrapper">
-                <a class="request-button"
-                   href="https://support.workvivo.com/hc/en-gb/requests/new"
-                   target="_blank">
-                    Request Access
-                </a>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =========================================================
@@ -796,7 +787,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
 
     workvivo_id = st.sidebar.text_input(
         "Workvivo tenant ID",
-        value=get_secret("WORKVIVO_ID", "1102"),
+        value="",
     )
 
     auto_detect = st.sidebar.checkbox(
@@ -804,12 +795,12 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         value=True,
     )
 
-    detected_api_url = get_api_url_from_workvivo_id(workvivo_id)
+    detected_api_url = get_api_url_from_workvivo_id(workvivo_id) if workvivo_id else ""
 
     if auto_detect:
         api_base_url = st.sidebar.text_input(
             "API Base URL",
-            value=detected_api_url,
+            value=detected_api_url if detected_api_url else "",
             disabled=True,
             help="Auto-detected from Workvivo ID prefix.",
         )
@@ -831,15 +822,13 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     test_result = st.sidebar.empty()
 
     st.sidebar.header("Filter")
+use_date_from = st.sidebar.checkbox("Use Date from")
+date_from_value = st.sidebar.date_input("Date from", value=None, disabled=not use_date_from)
 
-    default_from = date(2025, 4, 1)
-    default_to = date(2026, 4, 30)
-
-    date_from_date = st.sidebar.date_input("Date from", value=default_from)
-    date_to_date = st.sidebar.date_input("Date to", value=default_to)
+use_date_to = st.sidebar.checkbox("Use Date to")
+date_to_value = st.sidebar.date_input("Date to", value=None, disabled=not use_date_to)
 
     st.sidebar.header("Advanced")
-
     take = st.sidebar.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
     request_timeout = st.sidebar.number_input(
         "Request timeout (seconds)",
@@ -856,12 +845,21 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         step=0.1,
     )
 
+    date_from = None
+    date_to = None
+
+    if use_date_from and date_from_value:
+        date_from = datetime.combine(date_from_value, dt_time.min)
+
+    if use_date_to and date_to_value:
+        date_to = datetime.combine(date_to_value, dt_time.min)
+
     config = ExportConfig(
         api_base_url=api_base_url.strip().rstrip("/"),
         api_token=api_token.strip(),
         workvivo_id=workvivo_id.strip(),
-        date_from=datetime.combine(date_from_date, dt_time.min) if date_from_date else None,
-        date_to=datetime.combine(date_to_date, dt_time.min) if date_to_date else None,
+        date_from=date_from,
+        date_to=date_to,
         take=int(take),
         request_timeout=int(request_timeout),
         sleep_between_requests=float(sleep_between_requests),
@@ -881,10 +879,8 @@ def render_header(config: ExportConfig):
     with st.expander("Current configuration", expanded=False):
         st.write(f"**Workvivo ID:** `{config.workvivo_id}`")
         st.write(f"**API Base URL:** `{config.api_base_url}`")
-        st.write(
-            f"**Date range:** `{config.date_from.date() if config.date_from else 'None'}` "
-            f"to `{config.date_to.date() if config.date_to else 'None'}`"
-        )
+        st.write(f"**Date from:** `{config.date_from.date() if config.date_from else 'None'}`")
+        st.write(f"**Date to:** `{config.date_to.date() if config.date_to else 'None'}`")
 
 
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
@@ -1065,6 +1061,7 @@ def main_app():
             <strong>Notes</strong><br>
             - Hosted Streamlit apps cannot write directly into your laptop Downloads folder.<br>
             - This version packages exported media, playlists, and the manifest into a ZIP for browser download.<br>
+            - Date filters are optional.<br>
             - API URL can be auto-detected from Workvivo ID or manually overridden.
         </div>
         """,
