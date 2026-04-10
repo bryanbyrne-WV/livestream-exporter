@@ -659,6 +659,22 @@ def apply_global_branding():
                 border: 1px solid rgba(60,79,168,0.10) !important;
                 box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04) !important;
             }
+
+            section[data-testid="stSidebar"] details {
+                background: transparent !important;
+                border: none !important;
+            }
+
+            section[data-testid="stSidebar"] details summary {
+                border-radius: 10px !important;
+                border: 1px solid rgba(60,79,168,0.10) !important;
+                background: #FAFBFF !important;
+                padding: 0.35rem 0.6rem !important;
+            }
+
+            section[data-testid="stSidebar"] details[open] summary {
+                margin-bottom: 0.5rem !important;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -807,7 +823,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     workvivo_id = st.sidebar.text_input(
         "Workvivo tenant ID",
         value="",
-        placeholder="Enter your Workvivo tenant ID",
+        placeholder="Workvivo tenant ID",
     )
 
     auto_detect = st.sidebar.checkbox(
@@ -836,7 +852,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         "API token",
         type="password",
         value=get_secret("WORKVIVO_API_TOKEN", ""),
-        placeholder="Enter your Workvivo API token",
+        placeholder="API token",
         help="Provide via Streamlit secrets in production.",
     )
 
@@ -851,22 +867,22 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     use_date_to = st.sidebar.checkbox("Use Date to")
     date_to_value = st.sidebar.date_input("Date to", value=None, disabled=not use_date_to)
 
-    st.sidebar.header("Advanced")
-    take = st.sidebar.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
-    request_timeout = st.sidebar.number_input(
-        "Request timeout (seconds)",
-        min_value=5,
-        max_value=600,
-        value=60,
-        step=5,
-    )
-    sleep_between_requests = st.sidebar.number_input(
-        "Delay between API requests (seconds)",
-        min_value=0.0,
-        max_value=5.0,
-        value=0.2,
-        step=0.1,
-    )
+    with st.sidebar.expander("Advanced", expanded=False):
+        take = st.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
+        request_timeout = st.number_input(
+            "Request timeout (seconds)",
+            min_value=5,
+            max_value=600,
+            value=60,
+            step=5,
+        )
+        sleep_between_requests = st.number_input(
+            "Delay between API requests (seconds)",
+            min_value=0.0,
+            max_value=5.0,
+            value=0.2,
+            step=0.1,
+        )
 
     date_from = None
     date_to = None
