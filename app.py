@@ -698,138 +698,79 @@ def render_login_screen():
                 );
             }
 
-            section[data-testid="stSidebar"] {
-                display: none !important;
-            }
-
-            .block-container {
-                max-width: 520px !important;
-                padding-top: 1.5rem !important;
-                padding-bottom: 1rem !important;
-            }
-
-            .login-shell {
+            .login-wrapper {
                 max-width: 420px;
-                margin: 0 auto;
-            }
-
-            .login-card {
-                background: rgba(255, 255, 255, 0.72);
-                border: 1px solid rgba(90, 62, 166, 0.12);
-                border-radius: 18px;
-                padding: 1.6rem 1.5rem 1.25rem 1.5rem;
-                box-shadow: 0 10px 30px rgba(90, 62, 166, 0.10);
-                backdrop-filter: blur(8px);
-            }
-
-            .login-logo {
-                text-align: center;
-                margin-bottom: 0.35rem;
-            }
-
-            .login-logo img {
-                height: 120px;
-                max-width: 100%;
+                margin: 1.5rem auto 2rem auto;
             }
 
             .login-title {
-                font-size: 1.8rem;
+                font-size: 2rem;
                 color: #5A3EA6;
-                font-weight: 800;
-                margin-bottom: 0.25rem;
+                font-weight: 700;
+                margin-bottom: 0.4rem;
+                margin-top: 1rem;
                 text-align: center;
-                line-height: 1.2;
             }
 
             .login-note {
-                font-size: 0.98rem;
+                font-size: 1.05rem;
                 color: #6B56B0;
-                opacity: 0.92;
-                margin-bottom: 1.4rem;
+                opacity: 0.8;
+                margin-bottom: 2.2rem;
                 text-align: center;
             }
 
-            div[data-testid="stTextInput"] {
-                margin-bottom: 0.2rem !important;
-            }
-
-            div[data-testid="stTextInput"] label {
-                display: none !important;
-            }
-
-            div[data-testid="stTextInput"] input {
+            .underline-input input {
                 background: transparent !important;
                 border: none !important;
                 border-bottom: 1px solid #8368D8 !important;
                 border-radius: 0 !important;
                 color: #4A2F8A !important;
-                padding: 0.7rem 0 0.55rem 0 !important;
-                font-size: 1rem !important;
+                padding: 0.6rem 0 !important;
+                font-size: 1.05rem;
                 box-shadow: none !important;
             }
 
-            div[data-testid="stTextInput"] input:focus {
-                border-bottom: 2px solid #5A3EA6 !important;
-                box-shadow: none !important;
-            }
-
-            div[data-testid="stTextInput"] input::placeholder {
+            .underline-input input::placeholder {
                 color: #9A84DD !important;
-                opacity: 0.85 !important;
+                opacity: 0.6;
             }
 
-            div[data-testid="stCheckbox"] {
-                margin-top: 0.35rem !important;
-                margin-bottom: 0.7rem !important;
-            }
-
-            div[data-testid="stCheckbox"] label p {
-                color: #6B56B0 !important;
-                font-size: 0.92rem !important;
-            }
-
-            .login-btn-wrap {
-                margin-top: 0.4rem;
-            }
-
-            .login-btn-wrap .stButton > button {
+            .blue-btn button {
                 width: 100%;
                 background-color: #3C4FA8 !important;
                 color: white !important;
-                border-radius: 10px !important;
-                height: 2.9rem !important;
-                font-weight: 700 !important;
-                letter-spacing: 0.3px;
+                border-radius: 8px !important;
+                height: 3rem;
+                font-weight: 600;
+                letter-spacing: 0.5px;
                 border: none !important;
-                box-shadow: 0 8px 18px rgba(60, 79, 168, 0.18) !important;
-            }
-
-            .login-btn-wrap .stButton > button:hover {
-                background-color: #334493 !important;
-            }
-
-            .request-access-wrap {
-                text-align: center;
-                margin-top: 1rem;
+                margin-top: 1.8rem;
             }
 
             .request-button {
                 display: inline-block;
-                font-size: 0.92rem;
+                margin-top: 1.6rem;
+                font-size: 0.95rem;
                 color: #3C4FA8 !important;
                 text-decoration: underline;
-                opacity: 0.9;
+                opacity: 0.85;
+            }
+
+            div[data-testid="stTextInput"] label p {
+                color: #3f3f46 !important;
+                font-weight: 500;
             }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="login-shell"><div class="login-card">', unsafe_allow_html=True)
+    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
     st.markdown(
         """
-        <div class="login-logo">
-            <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png">
+        <div style="text-align:center; margin-bottom:10px;">
+            <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png" style="height:170px;">
         </div>
         """,
         unsafe_allow_html=True,
@@ -840,12 +781,14 @@ def render_login_screen():
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div class="underline-input">', unsafe_allow_html=True)
     username = st.text_input("Username", placeholder="Username", key="login_username")
     password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.checkbox("Remember me", disabled=True, key="remember_me")
 
-    st.markdown('<div class="login-btn-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
     login_button = st.button("LOGIN", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -859,18 +802,16 @@ def render_login_screen():
 
     st.markdown(
         """
-        <div class="request-access-wrap">
-            <a class="request-button"
-               href="https://support.workvivo.com/hc/en-gb/requests/new"
-               target="_blank">
-                Request Access
-            </a>
-        </div>
+        <a class="request-button"
+           href="https://support.workvivo.com/hc/en-gb/requests/new"
+           target="_blank">
+            Request Access
+        </a>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown('</div></div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =========================================================
