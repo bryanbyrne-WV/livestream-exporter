@@ -608,55 +608,8 @@ def apply_global_branding():
             }
 
             section[data-testid="stSidebar"] {
-                background: linear-gradient(180deg, #6203ed 0%, #4b00b5 100%) !important;
-                border-right: 1px solid rgba(255,255,255,0.12);
-            }
-
-            section[data-testid="stSidebar"] * {
-                color: white !important;
-            }
-
-            section[data-testid="stSidebar"] label,
-            section[data-testid="stSidebar"] .stMarkdown,
-            section[data-testid="stSidebar"] p,
-            section[data-testid="stSidebar"] h1,
-            section[data-testid="stSidebar"] h2,
-            section[data-testid="stSidebar"] h3 {
-                color: white !important;
-            }
-
-            section[data-testid="stSidebar"] input,
-            section[data-testid="stSidebar"] textarea {
-                background-color: rgba(255,255,255,0.12) !important;
-                color: white !important;
-                border: 1px solid rgba(255,255,255,0.22) !important;
-                border-radius: 8px !important;
-            }
-
-            section[data-testid="stSidebar"] input::placeholder,
-            section[data-testid="stSidebar"] textarea::placeholder {
-                color: rgba(255,255,255,0.75) !important;
-            }
-
-            section[data-testid="stSidebar"] .stDateInput > div > div,
-            section[data-testid="stSidebar"] .stNumberInput > div > div,
-            section[data-testid="stSidebar"] .stTextInput > div > div {
-                background-color: rgba(255,255,255,0.12) !important;
-                border: 1px solid rgba(255,255,255,0.22) !important;
-                border-radius: 8px !important;
-            }
-
-            section[data-testid="stSidebar"] button {
-                background-color: white !important;
-                color: #6203ed !important;
-                border: none !important;
-                font-weight: 700 !important;
-                border-radius: 8px !important;
-            }
-
-            section[data-testid="stSidebar"] button:hover {
-                background-color: #f3eefe !important;
-                color: #4b00b5 !important;
+                background: rgba(255,255,255,0.82);
+                backdrop-filter: blur(6px);
             }
 
             .main-title {
