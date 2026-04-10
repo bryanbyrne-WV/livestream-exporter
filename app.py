@@ -1,10 +1,13 @@
+# -*- coding: utf-8 -*-
 import csv
 import io
 import re
 import time
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, time as dt_time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -13,6 +16,9 @@ import requests
 import streamlit as st
 
 
+# =========================================================
+# APP CONFIG
+# =========================================================
 st.set_page_config(
     page_title="Workvivo Livestream Exporter",
     page_icon="🎥",
@@ -24,7 +30,6 @@ DEFAULT_TAKE = 100
 DEFAULT_REQUEST_TIMEOUT = 60
 DEFAULT_SLEEP_BETWEEN_REQUESTS = 0.2
 DEFAULT_CHUNK_SIZE = 1024 * 256
-DEFAULT_EXPORT_ROOT = Path.home() / "Downloads"
 
 MANIFEST_COLUMNS = [
     "livestream_id",
@@ -48,53 +53,27 @@ MANIFEST_COLUMNS = [
     "permalink",
 ]
 
-
-@dataclass
-class ExportConfig:
-    api_base_url: str
-    api_token: str
-    workvivo_id: str
-    date_from: datetime | None
-    date_to: datetime | None
-    take: int = DEFAULT_TAKE
-    request_timeout: int = DEFAULT_REQUEST_TIMEOUT
-    sleep_between_requests: float = DEFAULT_SLEEP_BETWEEN_REQUESTS
-    chunk_size: int = DEFAULT_CHUNK_SIZE
-    export_folder: Path = DEFAULT_EXPORT_ROOT
-
-    @property
-    def export_path(self) -> Path:
-        return self.export_folder / f"Exported_Livestreams_{self.workvivo_id}"
-
-    @property
-    def csv_path(self) -> Path:
-        return self.export_path / f"livestream_export_manifest_{self.workvivo_id}.csv"
+# Use secrets in deployment if possible
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "ChangeMePlease!"
 
 
-def build_session(config: ExportConfig) -> requests.Session:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "Authorization": f"Bearer {config.api_token}",
-            "Accept": "application/json",
-            "Workvivo-id": config.workvivo_id,
-            "User-Agent": "Mozilla/5.0",
-        }
-    )
-    return session
+# =========================================================
+# HELPERS
+# =========================================================
+def get_secret(name: str, default: str = "") -> str:
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return default
 
 
-def validate_config(config: ExportConfig) -> None:
-    if not config.api_base_url:
-        raise ValueError("Set API Base URL.")
-    if not config.workvivo_id or config.workvivo_id == "YOUR_WORKVIVO_ID":
-        raise ValueError("Set WORKVIVO_ID to the real Workvivo tenant ID.")
-    if not config.api_token or config.api_token in {"YOUR_API_TOKEN", "REPLACE_ME"}:
-        raise ValueError("Set API_TOKEN to a valid API token.")
-
-
-def ensure_export_folder(export_path: Path) -> None:
-    export_path.mkdir(parents=True, exist_ok=True)
+def sanitize_filename(filename: str) -> str:
+    filename = (filename or "").strip().replace("\n", " ").replace("\r", " ")
+    filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+    return filename[:180] if filename else "livestream"
 
 
 def iso_to_datetime(value: str | None) -> datetime | None:
@@ -126,12 +105,6 @@ def within_date_range(
     return True
 
 
-def sanitize_filename(filename: str) -> str:
-    filename = (filename or "").strip().replace("\n", " ").replace("\r", " ")
-    filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
-    return filename[:180] if filename else "livestream"
-
-
 def build_filename_base(livestream_id: str, title: str, timestamp: str) -> str:
     safe_title = sanitize_filename(title) or f"livestream_{livestream_id}"
     safe_timestamp = sanitize_filename((timestamp or "").replace(":", "-"))
@@ -140,10 +113,83 @@ def build_filename_base(livestream_id: str, title: str, timestamp: str) -> str:
     return f"{livestream_id}_{safe_title}"
 
 
+def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    buffer = io.StringIO()
+    df.to_csv(buffer, index=False)
+    return buffer.getvalue().encode("utf-8")
+
+
 def get_next_page(payload: dict[str, Any]):
     return payload.get("meta", {}).get("pagination", {}).get("next_page")
 
 
+def get_api_url_from_workvivo_id(wv_id: str) -> str:
+    """
+    Return likely API base URL based on Workvivo ID prefix.
+    Can still be overridden manually in the UI.
+    """
+    if not wv_id or len(str(wv_id).strip()) < 3:
+        return DEFAULT_API_BASE_URL
+
+    prefix = str(wv_id).strip()[:3]
+
+    if prefix == "100":
+        return "https://api.workvivo.us/v1"
+
+    if prefix == "300":
+        return "https://api.eu2.workvivo.com/v1"
+
+    if prefix == "400":
+        return "https://api.us2.workvivo.us/v1"
+
+    return DEFAULT_API_BASE_URL
+
+
+# =========================================================
+# DATA MODEL
+# =========================================================
+@dataclass
+class ExportConfig:
+    api_base_url: str
+    api_token: str
+    workvivo_id: str
+    date_from: datetime | None
+    date_to: datetime | None
+    take: int = DEFAULT_TAKE
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT
+    sleep_between_requests: float = DEFAULT_SLEEP_BETWEEN_REQUESTS
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    force_manual_api_url: bool = False
+
+
+# =========================================================
+# SESSION / REQUESTS
+# =========================================================
+def build_session(config: ExportConfig) -> requests.Session:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "Authorization": f"Bearer {config.api_token}",
+            "Accept": "application/json",
+            "Workvivo-id": config.workvivo_id,
+            "User-Agent": "Mozilla/5.0",
+        }
+    )
+    return session
+
+
+def validate_config(config: ExportConfig) -> None:
+    if not config.api_base_url:
+        raise ValueError("Set API Base URL.")
+    if not config.workvivo_id:
+        raise ValueError("Set Workvivo tenant ID.")
+    if not config.api_token:
+        raise ValueError("Set API token.")
+
+
+# =========================================================
+# LIVESTREAM HELPERS
+# =========================================================
 def get_recording_url(livestream: dict[str, Any]) -> str:
     video = livestream.get("video") or {}
     if isinstance(video, dict):
@@ -200,6 +246,33 @@ def matches_filters(livestream: dict[str, Any], config: ExportConfig) -> bool:
     return within_date_range(timestamp, config.date_from, config.date_to)
 
 
+def livestream_to_manifest_row(livestream: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "livestream_id": str(livestream.get("id", "")),
+        "title": livestream.get("title") or "",
+        "description": livestream.get("description") or "",
+        "host_name": get_host_name(livestream),
+        "started_at": livestream.get("started_at") or "",
+        "ended_at": livestream.get("ended_at") or "",
+        "created_at": livestream.get("created_at") or "",
+        "audience_type": get_audience_type(livestream),
+        "audience_names": get_audience_names(livestream),
+        "viewers_count": livestream.get("viewers_count", ""),
+        "recording_url": get_recording_url(livestream),
+        "resolved_playlist_url": "",
+        "playlist_path": "",
+        "media_playlist_path": "",
+        "saved_path": "",
+        "output_type": "",
+        "segment_count": "",
+        "status": "pending",
+        "permalink": livestream.get("permalink", ""),
+    }
+
+
+# =========================================================
+# HLS / DOWNLOAD HELPERS
+# =========================================================
 def is_m3u8_url(url: str) -> bool:
     return ".m3u8" in (url or "").lower()
 
@@ -338,6 +411,9 @@ def export_hls_assets(
     }
 
 
+# =========================================================
+# API CALLS
+# =========================================================
 def fetch_livestreams(
     session: requests.Session,
     config: ExportConfig,
@@ -390,7 +466,10 @@ def collect_all_livestreams(
             break
 
         collected.extend(livestreams)
-        status_box.info(f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})")
+        status_box.info(
+            f"Fetched page {page_number}: {len(livestreams)} livestreams "
+            f"(total {len(collected)})"
+        )
 
         next_page = get_next_page(payload)
         if next_page is None:
@@ -403,155 +482,347 @@ def collect_all_livestreams(
     return collected
 
 
-def livestream_to_manifest_row(livestream: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "livestream_id": str(livestream.get("id", "")),
-        "title": livestream.get("title") or "",
-        "description": livestream.get("description") or "",
-        "host_name": get_host_name(livestream),
-        "started_at": livestream.get("started_at") or "",
-        "ended_at": livestream.get("ended_at") or "",
-        "created_at": livestream.get("created_at") or "",
-        "audience_type": get_audience_type(livestream),
-        "audience_names": get_audience_names(livestream),
-        "viewers_count": livestream.get("viewers_count", ""),
-        "recording_url": get_recording_url(livestream),
-        "resolved_playlist_url": "",
-        "playlist_path": "",
-        "media_playlist_path": "",
-        "saved_path": "",
-        "output_type": "",
-        "segment_count": "",
-        "status": "pending",
-        "permalink": livestream.get("permalink", ""),
-    }
-
-
-def export_selected_livestreams(
+# =========================================================
+# ZIP EXPORT
+# =========================================================
+def export_selected_livestreams_to_zip(
     session: requests.Session,
     config: ExportConfig,
     selected_rows: list[dict[str, Any]],
     status_box,
     progress_bar,
-) -> list[dict[str, Any]]:
-    ensure_export_folder(config.export_path)
+) -> tuple[list[dict[str, Any]], bytes]:
     results: list[dict[str, Any]] = []
 
-    total = len(selected_rows)
-    if total == 0:
-        return results
+    if not selected_rows:
+        raise ValueError("No rows selected for export.")
 
-    for item_index, row in enumerate(selected_rows, start=1):
-        livestream_id = row["livestream_id"]
-        title = row["title"]
-        recording_url = row["recording_url"]
-        timestamp = row["started_at"] or row["created_at"]
+    with TemporaryDirectory() as temp_dir:
+        export_root = Path(temp_dir) / f"Exported_Livestreams_{config.workvivo_id}"
+        export_root.mkdir(parents=True, exist_ok=True)
 
-        status_box.info(f"Exporting {item_index}/{total}: {title or livestream_id}")
+        total = len(selected_rows)
 
-        row = dict(row)
+        for item_index, row in enumerate(selected_rows, start=1):
+            livestream_id = row["livestream_id"]
+            title = row["title"]
+            recording_url = row["recording_url"]
+            timestamp = row["started_at"] or row["created_at"]
 
-        if not recording_url:
-            row["status"] = "matched but no recording URL found"
-            results.append(row)
-            progress_bar.progress(item_index / total)
-            continue
+            status_box.info(f"Exporting {item_index}/{total}: {title or livestream_id}")
 
-        file_base = build_filename_base(
-            livestream_id=livestream_id,
-            title=title,
-            timestamp=timestamp,
-        )
+            row = dict(row)
 
-        try:
-            if is_m3u8_url(recording_url):
+            if not recording_url:
+                row["status"] = "matched but no recording URL found"
+                results.append(row)
+                progress_bar.progress(item_index / total)
+                continue
 
-                def segment_progress(index: int, segment_total: int):
-                    segment_fraction = index / max(segment_total, 1)
-                    overall = ((item_index - 1) + segment_fraction) / total
-                    progress_bar.progress(min(overall, 1.0))
+            file_base = build_filename_base(
+                livestream_id=livestream_id,
+                title=title,
+                timestamp=timestamp,
+            )
 
-                export_info = export_hls_assets(
-                    session=session,
-                    recording_url=recording_url,
-                    file_base=file_base,
-                    export_folder=config.export_path,
-                    timeout=config.request_timeout,
-                    chunk_size=config.chunk_size,
-                    progress_callback=segment_progress,
-                )
+            try:
+                if is_m3u8_url(recording_url):
 
-                row["saved_path"] = export_info["saved_path"]
-                row["output_type"] = export_info["output_type"]
-                row["segment_count"] = export_info["segment_count"]
-                row["playlist_path"] = export_info["playlist_path"]
-                row["media_playlist_path"] = export_info["media_playlist_path"]
-                row["resolved_playlist_url"] = export_info["playlist_url"]
-                row["status"] = f"hls merged to {row['output_type']} and m3u8 saved"
-            else:
-                ext = Path(urlparse(recording_url).path).suffix or ".mp4"
-                destination = config.export_path / f"{file_base}{ext}"
-                download_binary(
-                    session=session,
-                    url=recording_url,
-                    destination=destination,
-                    timeout=config.request_timeout,
-                    chunk_size=config.chunk_size,
-                )
-                row["saved_path"] = str(destination)
-                row["output_type"] = ext.lstrip(".")
-                row["status"] = f"file downloaded as {row['output_type']}"
+                    def segment_progress(index: int, segment_total: int):
+                        segment_fraction = index / max(segment_total, 1)
+                        overall = ((item_index - 1) + segment_fraction) / total
+                        progress_bar.progress(min(overall, 1.0))
+
+                    export_info = export_hls_assets(
+                        session=session,
+                        recording_url=recording_url,
+                        file_base=file_base,
+                        export_folder=export_root,
+                        timeout=config.request_timeout,
+                        chunk_size=config.chunk_size,
+                        progress_callback=segment_progress,
+                    )
+
+                    row["saved_path"] = str(Path(export_info["saved_path"]).name)
+                    row["output_type"] = export_info["output_type"]
+                    row["segment_count"] = export_info["segment_count"]
+                    row["playlist_path"] = str(Path(export_info["playlist_path"]).name)
+                    row["media_playlist_path"] = str(Path(export_info["media_playlist_path"]).name)
+                    row["resolved_playlist_url"] = export_info["playlist_url"]
+                    row["status"] = f"hls merged to {row['output_type']} and m3u8 saved"
+
+                else:
+                    ext = Path(urlparse(recording_url).path).suffix or ".mp4"
+                    destination = export_root / f"{file_base}{ext}"
+
+                    download_binary(
+                        session=session,
+                        url=recording_url,
+                        destination=destination,
+                        timeout=config.request_timeout,
+                        chunk_size=config.chunk_size,
+                    )
+
+                    row["saved_path"] = str(destination.name)
+                    row["output_type"] = ext.lstrip(".")
+                    row["status"] = f"file downloaded as {row['output_type']}"
+                    progress_bar.progress(item_index / total)
+
+            except Exception as exc:
+                row["status"] = f"failed: {exc}"
                 progress_bar.progress(item_index / total)
 
-        except Exception as exc:
-            row["status"] = f"failed: {exc}"
-            progress_bar.progress(item_index / total)
+            results.append(row)
 
-        results.append(row)
+        results_df = pd.DataFrame(results, columns=MANIFEST_COLUMNS)
+        manifest_path = export_root / f"livestream_export_manifest_{config.workvivo_id}.csv"
+        results_df.to_csv(manifest_path, index=False, quoting=csv.QUOTE_MINIMAL)
 
-    return results
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in export_root.rglob("*"):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(export_root.parent)
+                    zf.write(file_path, arcname=str(arcname))
+
+        zip_buffer.seek(0)
+        return results, zip_buffer.getvalue()
 
 
-def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    buffer = io.StringIO()
-    df.to_csv(buffer, index=False)
-    return buffer.getvalue().encode("utf-8")
-
-
+# =========================================================
+# STATE
+# =========================================================
 def init_state():
+    st.session_state.setdefault("authenticated", False)
     st.session_state.setdefault("fetched_rows", [])
     st.session_state.setdefault("export_results", [])
     st.session_state.setdefault("last_fetch_count", 0)
+    st.session_state.setdefault("export_zip_bytes", None)
+    st.session_state.setdefault("export_zip_name", "")
+    st.session_state.setdefault("config_test_passed", False)
 
 
-def get_secret_or_env(name: str, default: str = "") -> str:
-    try:
-        if name in st.secrets:
-            return str(st.secrets[name])
-    except Exception:
-        pass
-    return default
+# =========================================================
+# STYLING
+# =========================================================
+def apply_global_branding():
+    st.markdown(
+        """
+        <style>
+            .stApp {
+                background: linear-gradient(
+                    180deg,
+                    #F8F5FF 0%,
+                    #F0EAFF 28%,
+                    #EAF2FF 75%,
+                    #FCFDFF 100%
+                );
+            }
+
+            .main-title {
+                font-size: 2.2rem;
+                color: #5A3EA6;
+                font-weight: 800;
+                margin-bottom: 0.25rem;
+            }
+
+            .main-subtitle {
+                font-size: 1rem;
+                color: #6B56B0;
+                opacity: 0.9;
+                margin-bottom: 1.2rem;
+            }
+
+            .metric-card {
+                background: rgba(255,255,255,0.7);
+                padding: 1rem;
+                border-radius: 16px;
+                border: 1px solid rgba(90, 62, 166, 0.08);
+                box-shadow: 0 8px 24px rgba(60, 79, 168, 0.08);
+            }
+
+            section[data-testid="stSidebar"] {
+                background: rgba(255,255,255,0.78);
+                backdrop-filter: blur(6px);
+            }
+
+            .wv-note {
+                background: rgba(255,255,255,0.7);
+                border-radius: 14px;
+                padding: 0.9rem 1rem;
+                border: 1px solid rgba(60,79,168,0.08);
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
+def render_login_screen():
+    admin_username = get_secret("APP_ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME)
+    admin_password = get_secret("APP_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
+
+    st.markdown(
+        """
+        <style>
+            body {
+                background: linear-gradient(
+                    180deg,
+                    #EFE8FF 0%,
+                    #E4D9FF 30%,
+                    #DBEFFF 80%,
+                    #F9FCFF 100%
+                ) !important;
+            }
+
+            .login-wrapper {
+                max-width: 420px;
+                margin: 1.5rem auto 2rem auto;
+            }
+
+            .login-title {
+                font-size: 2rem;
+                color: #5A3EA6;
+                font-weight: 700;
+                margin-bottom: 0.4rem;
+                margin-top: 1rem;
+            }
+
+            .login-note {
+                font-size: 1.05rem;
+                color: #6B56B0;
+                opacity: 0.8;
+                margin-bottom: 2.2rem;
+            }
+
+            .underline-input input {
+                background: transparent !important;
+                border: none !important;
+                border-bottom: 1px solid #8368D8 !important;
+                border-radius: 0 !important;
+                color: #4A2F8A !important;
+                padding: 0.6rem 0 !important;
+                font-size: 1.05rem;
+            }
+
+            .underline-input input::placeholder {
+                color: #9A84DD !important;
+                opacity: 0.6;
+            }
+
+            .blue-btn button {
+                width: 100%;
+                background-color: #3C4FA8 !important;
+                color: white !important;
+                border-radius: 8px !important;
+                height: 3rem;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                border: none !important;
+                margin-top: 1.8rem;
+            }
+
+            .request-button {
+                display: inline-block;
+                margin-top: 1.6rem;
+                font-size: 0.95rem;
+                color: #3C4FA8 !important;
+                text-decoration: underline;
+                opacity: 0.85;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div style="text-align:center; margin-bottom:10px;">
+            <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png"
+                 style="height:170px;">
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="underline-input">', unsafe_allow_html=True)
+    username = st.text_input("Username", placeholder="Username")
+    password = st.text_input("Password", placeholder="Password", type="password")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.checkbox("Remember me", disabled=True)
+
+    st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
+    login_button = st.button("LOGIN")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if login_button:
+        if username == admin_username and password == admin_password:
+            st.session_state.authenticated = True
+            st.success("Logged in!")
+            st.rerun()
+        else:
+            st.error("❌ Invalid username or password.")
+
+    st.markdown(
+        """
+        <a class="request-button"
+           href="https://support.workvivo.com/hc/en-gb/requests/new"
+           target="_blank">
+            Request Access
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =========================================================
+# UI
+# =========================================================
 def sidebar_config() -> tuple[ExportConfig, bool]:
     st.sidebar.header("Connection")
 
-    api_base_url = st.sidebar.text_input(
-        "API Base URL",
-        value=get_secret_or_env("WORKVIVO_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help="Example: https://api.workvivo.com/v1",
+    workvivo_id = st.sidebar.text_input(
+        "Workvivo tenant ID",
+        value=get_secret("WORKVIVO_ID", "1102"),
     )
+
+    auto_detect = st.sidebar.checkbox(
+        "Auto-detect API URL from Workvivo ID",
+        value=True,
+    )
+
+    detected_api_url = get_api_url_from_workvivo_id(workvivo_id)
+
+    if auto_detect:
+        api_base_url = st.sidebar.text_input(
+            "API Base URL",
+            value=detected_api_url,
+            disabled=True,
+            help="Auto-detected from Workvivo ID prefix.",
+        )
+    else:
+        api_base_url = st.sidebar.text_input(
+            "API Base URL",
+            value=get_secret("WORKVIVO_API_BASE_URL", detected_api_url),
+            help="Example: https://api.workvivo.com/v1",
+        )
 
     api_token = st.sidebar.text_input(
         "API token",
         type="password",
-        value=get_secret_or_env("WORKVIVO_API_TOKEN", ""),
-        help="Use Streamlit secrets for deployment instead of hardcoding tokens.",
-    )
-
-    workvivo_id = st.sidebar.text_input(
-        "Workvivo tenant ID",
-        value=get_secret_or_env("WORKVIVO_ID", "1102"),
+        value=get_secret("WORKVIVO_API_TOKEN", ""),
+        help="Provide via Streamlit secrets in production.",
     )
 
     test_clicked = st.sidebar.button("Test connection", use_container_width=True)
@@ -581,10 +852,6 @@ def sidebar_config() -> tuple[ExportConfig, bool]:
         value=0.2,
         step=0.1,
     )
-    export_folder = st.sidebar.text_input(
-        "Export root folder",
-        value=str(DEFAULT_EXPORT_ROOT),
-    )
 
     config = ExportConfig(
         api_base_url=api_base_url.strip().rstrip("/"),
@@ -595,19 +862,26 @@ def sidebar_config() -> tuple[ExportConfig, bool]:
         take=int(take),
         request_timeout=int(request_timeout),
         sleep_between_requests=float(sleep_between_requests),
-        export_folder=Path(export_folder).expanduser(),
+        force_manual_api_url=not auto_detect,
     )
 
     return config, test_clicked
 
 
 def render_header(config: ExportConfig):
-    st.title("🎥 Workvivo Livestream Exporter")
-    st.caption("Fetch recorded livestreams, review them, and export selected recordings locally.")
+    st.markdown('<div class="main-title">🎥 Workvivo Livestream Exporter</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-subtitle">Fetch recorded livestreams, review them, and download a ZIP export bundle.</div>',
+        unsafe_allow_html=True,
+    )
 
-    with st.expander("Export destination", expanded=False):
-        st.write(f"Media files will be written to: `{config.export_path}`")
-        st.write(f"Manifest path: `{config.csv_path}`")
+    with st.expander("Current configuration", expanded=False):
+        st.write(f"**Workvivo ID:** `{config.workvivo_id}`")
+        st.write(f"**API Base URL:** `{config.api_base_url}`")
+        st.write(
+            f"**Date range:** `{config.date_from.date() if config.date_from else 'None'}` "
+            f"to `{config.date_to.date() if config.date_to else 'None'}`"
+        )
 
 
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
@@ -629,8 +903,9 @@ def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any
     c3.metric("Failed exports", failed)
 
 
-def main():
-    init_state()
+def main_app():
+    apply_global_branding()
+
     config, test_clicked = sidebar_config()
     render_header(config)
 
@@ -644,14 +919,17 @@ def main():
             ok, message = test_connection(session, config)
             if ok:
                 st.sidebar.success(message)
+                st.session_state.config_test_passed = True
             else:
                 st.sidebar.error(message)
+                st.session_state.config_test_passed = False
         except Exception as exc:
             st.sidebar.error(str(exc))
+            st.session_state.config_test_passed = False
 
     col_left, col_right = st.columns([1, 1])
     fetch_clicked = col_left.button("Fetch livestreams", use_container_width=True)
-    export_clicked = col_right.button("Export selected", use_container_width=True)
+    export_clicked = col_right.button("Export selected to ZIP", use_container_width=True)
 
     if fetch_clicked:
         try:
@@ -668,6 +946,8 @@ def main():
             st.session_state["fetched_rows"] = filtered_rows
             st.session_state["last_fetch_count"] = len(all_livestreams)
             st.session_state["export_results"] = []
+            st.session_state["export_zip_bytes"] = None
+            st.session_state["export_zip_name"] = ""
 
             progress_bar.progress(1.0)
             status_box.success(
@@ -706,7 +986,11 @@ def main():
             key="livestream_editor",
         )
 
-        selected_rows = edited_df[edited_df["selected"]].drop(columns=["selected"]).to_dict(orient="records")
+        selected_rows = (
+            edited_df[edited_df["selected"]]
+            .drop(columns=["selected"])
+            .to_dict(orient="records")
+        )
 
         manifest_csv = dataframe_to_csv_bytes(pd.DataFrame(rows, columns=MANIFEST_COLUMNS))
         st.download_button(
@@ -721,27 +1005,24 @@ def main():
                 validate_config(config)
                 session = build_session(config)
 
-                if not selected_rows:
-                    status_box.warning("No rows selected for export.")
-                else:
-                    progress_bar.progress(0.0)
-                    results = export_selected_livestreams(
-                        session,
-                        config,
-                        selected_rows,
-                        status_box,
-                        progress_bar,
-                    )
-                    st.session_state["export_results"] = results
+                progress_bar.progress(0.0)
+                results, zip_bytes = export_selected_livestreams_to_zip(
+                    session=session,
+                    config=config,
+                    selected_rows=selected_rows,
+                    status_box=status_box,
+                    progress_bar=progress_bar,
+                )
 
-                    results_df = pd.DataFrame(results, columns=MANIFEST_COLUMNS)
-                    ensure_export_folder(config.export_path)
-                    results_df.to_csv(config.csv_path, index=False, quoting=csv.QUOTE_MINIMAL)
+                st.session_state["export_results"] = results
+                st.session_state["export_zip_bytes"] = zip_bytes
+                st.session_state["export_zip_name"] = (
+                    f"livestream_export_{config.workvivo_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                )
 
-                    status_box.success(
-                        f"Export complete. {len(results)} rows processed. "
-                        f"Manifest written to {config.csv_path}"
-                    )
+                status_box.success(
+                    f"Export complete. {len(results)} rows processed. ZIP bundle is ready to download."
+                )
             except Exception as exc:
                 status_box.error(str(exc))
 
@@ -758,14 +1039,41 @@ def main():
             mime="text/csv",
         )
 
+    if st.session_state.get("export_zip_bytes"):
+        st.subheader("Download export bundle")
+        st.download_button(
+            label="Download ZIP export",
+            data=st.session_state["export_zip_bytes"],
+            file_name=st.session_state["export_zip_name"],
+            mime="application/zip",
+            use_container_width=True,
+        )
+
     st.markdown("---")
     st.markdown(
-        "**Notes**  \n"
-        "- API Base URL is configurable in the sidebar.  \n"
-        "- API token should be provided through the UI or Streamlit secrets.  \n"
-        "- HLS recordings (`.m3u8`) are merged by downloading and concatenating segments.  \n"
-        "- Output files and a manifest are written to the machine running Streamlit."
+        """
+        <div class="wv-note">
+            <strong>Notes</strong><br>
+            - Hosted Streamlit apps cannot write directly into your laptop Downloads folder.<br>
+            - This version packages exported media, playlists, and the manifest into a ZIP for browser download.<br>
+            - API URL can be auto-detected from Workvivo ID or manually overridden.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+
+# =========================================================
+# ENTRY
+# =========================================================
+def main():
+    init_state()
+
+    if not st.session_state.authenticated:
+        render_login_screen()
+        return
+
+    main_app()
 
 
 if __name__ == "__main__":
