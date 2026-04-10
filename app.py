@@ -175,7 +175,7 @@ def validate_config(config: ExportConfig) -> None:
     if not config.api_base_url:
         raise ValueError("Set API Base URL.")
     if not config.workvivo_id:
-        raise ValueError("Set Workvivo tenant ID.")
+        raise ValueError("Set Workvivo ID.")
     if not config.api_token:
         raise ValueError("Set API token.")
 
@@ -821,9 +821,9 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     st.sidebar.header("Connection")
 
     workvivo_id = st.sidebar.text_input(
-        "Workvivo tenant ID",
+        "Workvivo ID",
         value="",
-        placeholder="Workvivo tenant ID",
+        placeholder="",
     )
 
     auto_detect = st.sidebar.checkbox(
@@ -852,7 +852,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         "API token",
         type="password",
         value=get_secret("WORKVIVO_API_TOKEN", ""),
-        placeholder="API token",
+        placeholder="",
         help="Provide via Streamlit secrets in production.",
     )
 
