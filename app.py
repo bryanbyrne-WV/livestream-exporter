@@ -608,8 +608,17 @@ def apply_global_branding():
             }
 
             section[data-testid="stSidebar"] {
-                background: rgba(255,255,255,0.82);
+                background: rgba(90, 62, 166, 0.96);
                 backdrop-filter: blur(6px);
+            }
+
+            section[data-testid="stSidebar"] * {
+                color: white !important;
+            }
+
+            section[data-testid="stSidebar"] input,
+            section[data-testid="stSidebar"] textarea {
+                color: #111827 !important;
             }
 
             .main-title {
@@ -624,13 +633,6 @@ def apply_global_branding():
                 color: #6B56B0;
                 opacity: 0.9;
                 margin-bottom: 1.2rem;
-            }
-
-            .wv-note {
-                background: rgba(255,255,255,0.7);
-                border-radius: 14px;
-                padding: 0.9rem 1rem;
-                border: 1px solid rgba(60,79,168,0.08);
             }
 
             .download-anchor {
@@ -794,6 +796,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     workvivo_id = st.sidebar.text_input(
         "Workvivo tenant ID",
         value="",
+        placeholder="Enter your Workvivo tenant ID",
     )
 
     auto_detect = st.sidebar.checkbox(
@@ -821,7 +824,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         "API token",
         type="password",
         value=get_secret("WORKVIVO_API_TOKEN", ""),
-        help="Provide via Streamlit secrets in production.",
+        placeholder="Enter your Workvivo API token",
     )
 
     test_clicked = st.sidebar.button("Test connection", use_container_width=True)
@@ -835,22 +838,22 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     use_date_to = st.sidebar.checkbox("Use Date to")
     date_to_value = st.sidebar.date_input("Date to", value=None, disabled=not use_date_to)
 
-    st.sidebar.header("Advanced")
-    take = st.sidebar.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
-    request_timeout = st.sidebar.number_input(
-        "Request timeout (seconds)",
-        min_value=5,
-        max_value=600,
-        value=60,
-        step=5,
-    )
-    sleep_between_requests = st.sidebar.number_input(
-        "Delay between API requests (seconds)",
-        min_value=0.0,
-        max_value=5.0,
-        value=0.2,
-        step=0.1,
-    )
+    with st.sidebar.expander("Advanced", expanded=False):
+        take = st.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
+        request_timeout = st.number_input(
+            "Request timeout (seconds)",
+            min_value=5,
+            max_value=600,
+            value=60,
+            step=5,
+        )
+        sleep_between_requests = st.number_input(
+            "Delay between API requests (seconds)",
+            min_value=0.0,
+            max_value=5.0,
+            value=0.2,
+            step=0.1,
+        )
 
     date_from = None
     date_to = None
@@ -1060,20 +1063,6 @@ def main_app():
             mime="application/zip",
             use_container_width=True,
         )
-
-    st.markdown("---")
-    st.markdown(
-        """
-        <div class="wv-note">
-            <strong>Notes</strong><br>
-            - Hosted Streamlit apps cannot write directly into your laptop Downloads folder.<br>
-            - This version packages exported media, playlists, and the manifest into a ZIP for browser download.<br>
-            - Date filters are optional.<br>
-            - API URL can be auto-detected from Workvivo ID or manually overridden.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 # =========================================================
