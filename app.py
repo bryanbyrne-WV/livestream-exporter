@@ -3,7 +3,7 @@ import io
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time as dt_time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -13,16 +13,13 @@ import requests
 import streamlit as st
 
 
-# =========================
-# APP CONFIG
-# =========================
 st.set_page_config(
     page_title="Workvivo Livestream Exporter",
     page_icon="🎥",
     layout="wide",
 )
 
-API_BASE_URL = "https://api.workvivo.com/v1"
+DEFAULT_API_BASE_URL = "https://api.workvivo.com/v1"
 DEFAULT_TAKE = 100
 DEFAULT_REQUEST_TIMEOUT = 60
 DEFAULT_SLEEP_BETWEEN_REQUESTS = 0.2
@@ -52,11 +49,9 @@ MANIFEST_COLUMNS = [
 ]
 
 
-# =========================
-# DATA MODELS
-# =========================
 @dataclass
 class ExportConfig:
+    api_base_url: str
     api_token: str
     workvivo_id: str
     date_from: datetime | None
@@ -76,9 +71,6 @@ class ExportConfig:
         return self.export_path / f"livestream_export_manifest_{self.workvivo_id}.csv"
 
 
-# =========================
-# SESSION + HELPERS
-# =========================
 def build_session(config: ExportConfig) -> requests.Session:
     session = requests.Session()
     session.headers.update(
@@ -93,6 +85,8 @@ def build_session(config: ExportConfig) -> requests.Session:
 
 
 def validate_config(config: ExportConfig) -> None:
+    if not config.api_base_url:
+        raise ValueError("Set API Base URL.")
     if not config.workvivo_id or config.workvivo_id == "YOUR_WORKVIVO_ID":
         raise ValueError("Set WORKVIVO_ID to the real Workvivo tenant ID.")
     if not config.api_token or config.api_token in {"YOUR_API_TOKEN", "REPLACE_ME"}:
@@ -112,7 +106,11 @@ def iso_to_datetime(value: str | None) -> datetime | None:
         return None
 
 
-def within_date_range(iso_value: str, date_from: datetime | None, date_to: datetime | None) -> bool:
+def within_date_range(
+    iso_value: str,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> bool:
     dt = iso_to_datetime(iso_value)
     if dt is None:
         return False
@@ -191,6 +189,7 @@ def get_timestamp_for_filter(livestream: dict[str, Any]) -> str:
 def matches_filters(livestream: dict[str, Any], config: ExportConfig) -> bool:
     if not livestream.get("is_recorded"):
         return False
+
     if livestream.get("recording_status") != "done":
         return False
 
@@ -211,7 +210,13 @@ def fetch_text(session: requests.Session, url: str, timeout: int) -> str:
     return response.text
 
 
-def download_binary(session: requests.Session, url: str, destination: Path, timeout: int, chunk_size: int) -> None:
+def download_binary(
+    session: requests.Session,
+    url: str,
+    destination: Path,
+    timeout: int,
+    chunk_size: int,
+) -> None:
     with session.get(url, stream=True, timeout=timeout) as response:
         response.raise_for_status()
         with open(destination, "wb") as f:
@@ -239,6 +244,7 @@ def resolve_playlist_target(base_url: str, line: str) -> str:
 
 def get_variant_playlist_url(playlist_url: str, content: str) -> str:
     lines = parse_m3u8_lines(content)
+
     if not is_master_playlist(lines):
         return playlist_url
 
@@ -268,6 +274,7 @@ def guess_segment_extension(segment_urls: list[str]) -> str:
         return ".bin"
 
     first_path = urlparse(segment_urls[0]).path.lower()
+
     if first_path.endswith(".ts"):
         return ".ts"
     if first_path.endswith(".m4s"):
@@ -331,23 +338,45 @@ def export_hls_assets(
     }
 
 
-# =========================
-# API
-# =========================
-def fetch_livestreams(session: requests.Session, config: ExportConfig, skip: int, take: int) -> dict[str, Any]:
-    url = f"{API_BASE_URL.rstrip('/')}/livestreams"
-    params = {"skip": skip, "take": take}
+def fetch_livestreams(
+    session: requests.Session,
+    config: ExportConfig,
+    skip: int,
+    take: int,
+) -> dict[str, Any]:
+    url = f"{config.api_base_url.rstrip('/')}/livestreams"
+    params = {
+        "skip": skip,
+        "take": take,
+    }
+
     response = session.get(url, params=params, timeout=config.request_timeout)
 
     if not response.ok:
         raise RuntimeError(
-            f"Request failed with status {response.status_code}. URL: {response.url}. Body: {response.text}"
+            f"Request failed with status {response.status_code}. "
+            f"URL: {response.url}. "
+            f"Body: {response.text}"
         )
 
     return response.json()
 
 
-def collect_all_livestreams(session: requests.Session, config: ExportConfig, status_box, progress_bar) -> list[dict[str, Any]]:
+def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bool, str]:
+    try:
+        payload = fetch_livestreams(session, config, skip=0, take=1)
+        count = len(payload.get("data", []))
+        return True, f"Connection successful. Retrieved {count} record(s) from livestreams endpoint."
+    except Exception as exc:
+        return False, str(exc)
+
+
+def collect_all_livestreams(
+    session: requests.Session,
+    config: ExportConfig,
+    status_box,
+    progress_bar,
+) -> list[dict[str, Any]]:
     skip = 0
     collected: list[dict[str, Any]] = []
     page_number = 0
@@ -374,9 +403,6 @@ def collect_all_livestreams(session: requests.Session, config: ExportConfig, sta
     return collected
 
 
-# =========================
-# MANIFEST + EXPORT
-# =========================
 def livestream_to_manifest_row(livestream: dict[str, Any]) -> dict[str, Any]:
     return {
         "livestream_id": str(livestream.get("id", "")),
@@ -424,6 +450,7 @@ def export_selected_livestreams(
         status_box.info(f"Exporting {item_index}/{total}: {title or livestream_id}")
 
         row = dict(row)
+
         if not recording_url:
             row["status"] = "matched but no recording URL found"
             results.append(row)
@@ -438,6 +465,7 @@ def export_selected_livestreams(
 
         try:
             if is_m3u8_url(recording_url):
+
                 def segment_progress(index: int, segment_total: int):
                     segment_fraction = index / max(segment_total, 1)
                     overall = ((item_index - 1) + segment_fraction) / total
@@ -452,6 +480,7 @@ def export_selected_livestreams(
                     chunk_size=config.chunk_size,
                     progress_callback=segment_progress,
                 )
+
                 row["saved_path"] = export_info["saved_path"]
                 row["output_type"] = export_info["output_type"]
                 row["segment_count"] = export_info["segment_count"]
@@ -489,61 +518,110 @@ def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
-# =========================
-# UI
-# =========================
 def init_state():
     st.session_state.setdefault("fetched_rows", [])
     st.session_state.setdefault("export_results", [])
     st.session_state.setdefault("last_fetch_count", 0)
 
 
-def sidebar_config() -> ExportConfig:
+def get_secret_or_env(name: str, default: str = "") -> str:
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return default
+
+
+def sidebar_config() -> tuple[ExportConfig, bool]:
     st.sidebar.header("Connection")
-    api_token = st.sidebar.text_input("API token", type="password", help="Stored only in this Streamlit session.")
-    workvivo_id = st.sidebar.text_input("Workvivo tenant ID", value="1102")
+
+    api_base_url = st.sidebar.text_input(
+        "API Base URL",
+        value=get_secret_or_env("WORKVIVO_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help="Example: https://api.workvivo.com/v1",
+    )
+
+    api_token = st.sidebar.text_input(
+        "API token",
+        type="password",
+        value=get_secret_or_env("WORKVIVO_API_TOKEN", ""),
+        help="Use Streamlit secrets for deployment instead of hardcoding tokens.",
+    )
+
+    workvivo_id = st.sidebar.text_input(
+        "Workvivo tenant ID",
+        value=get_secret_or_env("WORKVIVO_ID", "1102"),
+    )
+
+    test_clicked = st.sidebar.button("Test connection", use_container_width=True)
 
     st.sidebar.header("Filter")
-    default_from = datetime(2025, 4, 1)
-    default_to = datetime(2026, 4, 30)
 
-    date_from_date = st.sidebar.date_input("Date from", value=default_from.date())
-    date_to_date = st.sidebar.date_input("Date to", value=default_to.date())
+    default_from = date(2025, 4, 1)
+    default_to = date(2026, 4, 30)
+
+    date_from_date = st.sidebar.date_input("Date from", value=default_from)
+    date_to_date = st.sidebar.date_input("Date to", value=default_to)
 
     st.sidebar.header("Advanced")
-    take = st.sidebar.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
-    request_timeout = st.sidebar.number_input("Request timeout (seconds)", min_value=5, max_value=600, value=60, step=5)
-    sleep_between_requests = st.sidebar.number_input(
-        "Delay between API requests (seconds)", min_value=0.0, max_value=5.0, value=0.2, step=0.1
-    )
-    export_folder = st.sidebar.text_input("Export root folder", value=str(DEFAULT_EXPORT_ROOT))
 
-    return ExportConfig(
-        api_token=api_token,
+    take = st.sidebar.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
+    request_timeout = st.sidebar.number_input(
+        "Request timeout (seconds)",
+        min_value=5,
+        max_value=600,
+        value=60,
+        step=5,
+    )
+    sleep_between_requests = st.sidebar.number_input(
+        "Delay between API requests (seconds)",
+        min_value=0.0,
+        max_value=5.0,
+        value=0.2,
+        step=0.1,
+    )
+    export_folder = st.sidebar.text_input(
+        "Export root folder",
+        value=str(DEFAULT_EXPORT_ROOT),
+    )
+
+    config = ExportConfig(
+        api_base_url=api_base_url.strip().rstrip("/"),
+        api_token=api_token.strip(),
         workvivo_id=workvivo_id.strip(),
-        date_from=datetime.combine(date_from_date, datetime.min.time()) if date_from_date else None,
-        date_to=datetime.combine(date_to_date, datetime.min.time()) if date_to_date else None,
+        date_from=datetime.combine(date_from_date, dt_time.min) if date_from_date else None,
+        date_to=datetime.combine(date_to_date, dt_time.min) if date_to_date else None,
         take=int(take),
         request_timeout=int(request_timeout),
         sleep_between_requests=float(sleep_between_requests),
         export_folder=Path(export_folder).expanduser(),
     )
 
+    return config, test_clicked
+
 
 def render_header(config: ExportConfig):
     st.title("🎥 Workvivo Livestream Exporter")
-    st.caption("Fetch recorded livestreams, review them in a table, and export the selected recordings locally.")
+    st.caption("Fetch recorded livestreams, review them, and export selected recordings locally.")
 
     with st.expander("Export destination", expanded=False):
         st.write(f"Media files will be written to: `{config.export_path}`")
         st.write(f"Manifest path: `{config.csv_path}`")
 
 
-
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
     matched = len(rows)
-    exported_ok = sum(1 for row in exported_rows if str(row.get("status", "")).startswith(("hls merged", "file downloaded")))
-    failed = sum(1 for row in exported_rows if str(row.get("status", "")).startswith("failed:"))
+    exported_ok = sum(
+        1
+        for row in exported_rows
+        if str(row.get("status", "")).startswith(("hls merged", "file downloaded"))
+    )
+    failed = sum(
+        1
+        for row in exported_rows
+        if str(row.get("status", "")).startswith("failed:")
+    )
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Matched recorded livestreams", matched)
@@ -551,35 +629,50 @@ def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any
     c3.metric("Failed exports", failed)
 
 
-
 def main():
     init_state()
-    config = sidebar_config()
+    config, test_clicked = sidebar_config()
     render_header(config)
+
+    status_box = st.empty()
+    progress_bar = st.progress(0.0)
+
+    if test_clicked:
+        try:
+            validate_config(config)
+            session = build_session(config)
+            ok, message = test_connection(session, config)
+            if ok:
+                st.sidebar.success(message)
+            else:
+                st.sidebar.error(message)
+        except Exception as exc:
+            st.sidebar.error(str(exc))
 
     col_left, col_right = st.columns([1, 1])
     fetch_clicked = col_left.button("Fetch livestreams", use_container_width=True)
     export_clicked = col_right.button("Export selected", use_container_width=True)
-
-    status_box = st.empty()
-    progress_bar = st.progress(0.0)
 
     if fetch_clicked:
         try:
             validate_config(config)
             session = build_session(config)
             all_livestreams = collect_all_livestreams(session, config, status_box, progress_bar)
+
             filtered_rows = [
                 livestream_to_manifest_row(livestream)
                 for livestream in all_livestreams
                 if matches_filters(livestream, config)
             ]
+
             st.session_state["fetched_rows"] = filtered_rows
             st.session_state["last_fetch_count"] = len(all_livestreams)
             st.session_state["export_results"] = []
+
             progress_bar.progress(1.0)
             status_box.success(
-                f"Fetched {len(all_livestreams)} livestreams. {len(filtered_rows)} matched the recorded/date filters."
+                f"Fetched {len(all_livestreams)} livestreams. "
+                f"{len(filtered_rows)} matched the recorded/date filters."
             )
         except Exception as exc:
             status_box.error(str(exc))
@@ -592,7 +685,8 @@ def main():
 
         st.subheader("Matched livestreams")
         st.write(
-            f"Total livestreams fetched: **{st.session_state.get('last_fetch_count', 0)}**  \\nMatched recorded livestreams: **{len(rows)}**"
+            f"Total livestreams fetched: **{st.session_state.get('last_fetch_count', 0)}**  \n"
+            f"Matched recorded livestreams: **{len(rows)}**"
         )
 
         df = pd.DataFrame(rows)
@@ -626,18 +720,27 @@ def main():
             try:
                 validate_config(config)
                 session = build_session(config)
+
                 if not selected_rows:
                     status_box.warning("No rows selected for export.")
                 else:
                     progress_bar.progress(0.0)
-                    results = export_selected_livestreams(session, config, selected_rows, status_box, progress_bar)
+                    results = export_selected_livestreams(
+                        session,
+                        config,
+                        selected_rows,
+                        status_box,
+                        progress_bar,
+                    )
                     st.session_state["export_results"] = results
 
                     results_df = pd.DataFrame(results, columns=MANIFEST_COLUMNS)
                     ensure_export_folder(config.export_path)
                     results_df.to_csv(config.csv_path, index=False, quoting=csv.QUOTE_MINIMAL)
+
                     status_box.success(
-                        f"Export complete. {len(results)} rows processed. Manifest written to {config.csv_path}"
+                        f"Export complete. {len(results)} rows processed. "
+                        f"Manifest written to {config.csv_path}"
                     )
             except Exception as exc:
                 status_box.error(str(exc))
@@ -658,9 +761,10 @@ def main():
     st.markdown("---")
     st.markdown(
         "**Notes**  \n"
-        "- API token is entered in the sidebar and used only for the current session.  \n"
+        "- API Base URL is configurable in the sidebar.  \n"
+        "- API token should be provided through the UI or Streamlit secrets.  \n"
         "- HLS recordings (`.m3u8`) are merged by downloading and concatenating segments.  \n"
-        "- Output files and a manifest are written to your selected export folder on the machine running Streamlit."
+        "- Output files and a manifest are written to the machine running Streamlit."
     )
 
 
