@@ -606,8 +606,9 @@ def apply_global_branding():
             }
 
             section[data-testid="stSidebar"] {
-                background: rgba(255,255,255,0.82);
+                background: rgba(255,255,255,0.88);
                 backdrop-filter: blur(6px);
+                border-right: 1px solid rgba(90, 62, 166, 0.08);
             }
 
             .main-title {
@@ -624,19 +625,39 @@ def apply_global_branding():
                 margin-bottom: 1.2rem;
             }
 
-            .wv-note {
-                background: rgba(255,255,255,0.7);
-                border-radius: 14px;
-                padding: 0.9rem 1rem;
-                border: 1px solid rgba(60,79,168,0.08);
-            }
-
             .download-anchor {
                 padding: 1rem 1rem 0.4rem 1rem;
                 border-radius: 14px;
                 background: rgba(255,255,255,0.72);
                 border: 1px solid rgba(60,79,168,0.08);
                 margin-bottom: 0.8rem;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stTextInput"] input,
+            section[data-testid="stSidebar"] div[data-testid="stNumberInput"] input,
+            section[data-testid="stSidebar"] div[data-testid="stDateInput"] input {
+                background: #FAFBFF !important;
+                border: 1px solid #E3E8F4 !important;
+                border-radius: 10px !important;
+                box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04) !important;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stTextInput"] input:focus,
+            section[data-testid="stSidebar"] div[data-testid="stNumberInput"] input:focus,
+            section[data-testid="stSidebar"] div[data-testid="stDateInput"] input:focus {
+                border: 1px solid #B7C3E0 !important;
+                box-shadow: 0 0 0 2px rgba(90, 62, 166, 0.08) !important;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stTextInput"] input::placeholder {
+                color: #98A2B3 !important;
+                opacity: 1 !important;
+            }
+
+            section[data-testid="stSidebar"] .stButton > button {
+                border-radius: 10px !important;
+                border: 1px solid rgba(60,79,168,0.10) !important;
+                box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04) !important;
             }
         </style>
         """,
@@ -786,6 +807,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     workvivo_id = st.sidebar.text_input(
         "Workvivo tenant ID",
         value="",
+        placeholder="Enter your Workvivo tenant ID",
     )
 
     auto_detect = st.sidebar.checkbox(
@@ -806,6 +828,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         api_base_url = st.sidebar.text_input(
             "API Base URL",
             value="",
+            placeholder="https://api.workvivo.com/v1",
             help="Example: https://api.workvivo.com/v1",
         )
 
@@ -813,6 +836,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         "API token",
         type="password",
         value=get_secret("WORKVIVO_API_TOKEN", ""),
+        placeholder="Enter your Workvivo API token",
         help="Provide via Streamlit secrets in production.",
     )
 
@@ -1052,20 +1076,6 @@ def main_app():
             mime="application/zip",
             use_container_width=True,
         )
-
-    st.markdown("---")
-    st.markdown(
-        """
-        <div class="wv-note">
-            <strong>Notes</strong><br>
-            - Hosted Streamlit apps cannot write directly into your laptop Downloads folder.<br>
-            - This version packages exported media, playlists, and the manifest into a ZIP for browser download.<br>
-            - Date filters are optional.<br>
-            - API URL can be auto-detected from Workvivo ID or manually overridden.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 # =========================================================
