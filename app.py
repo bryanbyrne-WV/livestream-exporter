@@ -456,7 +456,9 @@ def collect_all_livestreams(
             break
 
         collected.extend(livestreams)
-        status_box.info(f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})")
+        status_box.info(
+            f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})"
+        )
 
         next_page = get_next_page(payload)
         if next_page is None:
@@ -663,7 +665,8 @@ def render_login_screen():
 
             .login-wrapper {
                 max-width: 420px;
-                margin: 1.5rem auto 2rem auto;
+                margin: 0 auto;
+                padding-top: 40px;
             }
 
             .login-title {
@@ -729,52 +732,57 @@ def render_login_screen():
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div style="text-align:center; margin-bottom:10px;">
-            <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png" style="height:170px;">
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
-        unsafe_allow_html=True,
-    )
+    left, center, right = st.columns([1, 1.2, 1])
 
-    st.markdown('<div class="underline-input">', unsafe_allow_html=True)
-    username = st.text_input("Username", placeholder="Username", key="login_username")
-    password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
-    st.markdown('</div>', unsafe_allow_html=True)
+    with center:
+        st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div style="text-align:center; margin-bottom:10px;">
+                <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png" style="height:170px;">
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.checkbox("Remember me", disabled=True, key="remember_me")
+        st.markdown('<div class="underline-input">', unsafe_allow_html=True)
+        username = st.text_input("Username", placeholder="Username", key="login_username")
+        password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
-    login_button = st.button("LOGIN", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.checkbox("Remember me", disabled=True, key="remember_me")
 
-    if login_button:
-        if username == admin_username and password == admin_password:
-            st.session_state.authenticated = True
-            st.success("Logged in!")
-            st.rerun()
-        else:
-            st.error("❌ Invalid username or password.")
+        st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
+        login_button = st.button("LOGIN", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <a class="request-button"
-           href="https://support.workvivo.com/hc/en-gb/requests/new"
-           target="_blank">
-            Request Access
-        </a>
-        """,
-        unsafe_allow_html=True,
-    )
+        if login_button:
+            if username == admin_username and password == admin_password:
+                st.session_state.authenticated = True
+                st.success("Logged in!")
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password.")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div style="text-align:center;">
+                <a class="request-button"
+                   href="https://support.workvivo.com/hc/en-gb/requests/new"
+                   target="_blank">
+                    Request Access
+                </a>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =========================================================
