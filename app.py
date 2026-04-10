@@ -54,7 +54,7 @@ MANIFEST_COLUMNS = [
 ]
 
 DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "ChangeMePlease!"
+DEFAULT_ADMIN_PASSWORD = "Cops123!"
 
 
 # =========================================================
@@ -649,34 +649,54 @@ def render_login_screen():
     st.markdown(
         """
         <style>
-            body {
+            .stApp {
                 background: linear-gradient(
                     180deg,
                     #EFE8FF 0%,
                     #E4D9FF 30%,
                     #DBEFFF 80%,
                     #F9FCFF 100%
-                ) !important;
+                );
             }
 
-            .login-wrapper {
-                max-width: 420px;
-                margin: 1.5rem auto 2rem auto;
+            .login-shell {
+                display: flex;
+                justify-content: center;
+                align-items: flex-start;
+                padding-top: 3rem;
+                padding-bottom: 2rem;
+            }
+
+            .login-card {
+                width: 100%;
+                max-width: 430px;
+                background: rgba(255,255,255,0.88);
+                border: 1px solid rgba(90, 62, 166, 0.10);
+                border-radius: 24px;
+                box-shadow: 0 18px 40px rgba(60, 79, 168, 0.12);
+                padding: 2rem 2rem 1.7rem 2rem;
+            }
+
+            .login-logo {
+                text-align: center;
+                margin-bottom: 0.5rem;
             }
 
             .login-title {
                 font-size: 2rem;
                 color: #5A3EA6;
                 font-weight: 700;
-                margin-bottom: 0.4rem;
-                margin-top: 1rem;
+                margin-bottom: 0.35rem;
+                margin-top: 0.5rem;
+                text-align: center;
             }
 
             .login-note {
-                font-size: 1.05rem;
+                font-size: 1.02rem;
                 color: #6B56B0;
-                opacity: 0.8;
-                margin-bottom: 2.2rem;
+                opacity: 0.85;
+                margin-bottom: 1.6rem;
+                text-align: center;
             }
 
             .underline-input input {
@@ -685,95 +705,105 @@ def render_login_screen():
                 border-bottom: 1px solid #8368D8 !important;
                 border-radius: 0 !important;
                 color: #4A2F8A !important;
-                padding: 0.6rem 0 !important;
-                font-size: 1.05rem;
+                padding: 0.7rem 0 !important;
+                font-size: 1.02rem;
+                box-shadow: none !important;
             }
 
             .underline-input input::placeholder {
                 color: #9A84DD !important;
-                opacity: 0.6;
+                opacity: 0.65;
             }
 
             .blue-btn button {
                 width: 100%;
                 background-color: #3C4FA8 !important;
                 color: white !important;
-                border-radius: 8px !important;
+                border-radius: 10px !important;
                 height: 3rem;
                 font-weight: 600;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.4px;
                 border: none !important;
-                margin-top: 1.8rem;
+                margin-top: 1.2rem;
             }
 
             .request-button {
                 display: inline-block;
-                margin-top: 1.6rem;
+                margin-top: 1.2rem;
                 font-size: 0.95rem;
                 color: #3C4FA8 !important;
                 text-decoration: underline;
-                opacity: 0.85;
+                opacity: 0.9;
+            }
+
+            .request-wrapper {
+                text-align: center;
             }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+    left, center, right = st.columns([1.2, 1.6, 1.2])
 
-    st.markdown(
-        """
-        <div style="text-align:center; margin-bottom:10px;">
-            <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png"
-                 style="height:170px;">
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with center:
+        st.markdown('<div class="login-shell"><div class="login-card">', unsafe_allow_html=True)
 
-    st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            """
+            <div class="login-logo">
+                <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png"
+                     style="height:120px;">
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    st.markdown('<div class="underline-input">', unsafe_allow_html=True)
-    username = st.text_input("Username", placeholder="Username")
-    password = st.text_input("Password", placeholder="Password", type="password")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.checkbox("Remember me", disabled=True)
+        st.markdown('<div class="underline-input">', unsafe_allow_html=True)
+        username = st.text_input("Username", placeholder="Username", key="login_username")
+        password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
-    login_button = st.button("LOGIN")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.checkbox("Remember me", disabled=True)
 
-    if login_button:
-        if username == admin_username and password == admin_password:
-            st.session_state.authenticated = True
-            st.success("Logged in!")
-            st.rerun()
-        else:
-            st.error("❌ Invalid username or password.")
+        st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
+        login_button = st.button("LOGIN", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <a class="request-button"
-           href="https://support.workvivo.com/hc/en-gb/requests/new"
-           target="_blank">
-            Request Access
-        </a>
-        """,
-        unsafe_allow_html=True,
-    )
+        if login_button:
+            if username == admin_username and password == admin_password:
+                st.session_state.authenticated = True
+                st.success("Logged in!")
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password.")
 
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class="request-wrapper">
+                <a class="request-button"
+                   href="https://support.workvivo.com/hc/en-gb/requests/new"
+                   target="_blank">
+                    Request Access
+                </a>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 # =========================================================
 # UI
 # =========================================================
-def sidebar_config() -> tuple[ExportConfig, bool]:
+def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     st.sidebar.header("Connection")
 
     workvivo_id = st.sidebar.text_input(
@@ -810,6 +840,7 @@ def sidebar_config() -> tuple[ExportConfig, bool]:
     )
 
     test_clicked = st.sidebar.button("Test connection", use_container_width=True)
+    test_result = st.sidebar.empty()
 
     st.sidebar.header("Filter")
 
@@ -849,7 +880,7 @@ def sidebar_config() -> tuple[ExportConfig, bool]:
         force_manual_api_url=not auto_detect,
     )
 
-    return config, test_clicked
+    return config, test_clicked, test_result
 
 
 def render_header(config: ExportConfig):
@@ -888,7 +919,7 @@ def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any
 def main_app():
     apply_global_branding()
 
-    config, test_clicked = sidebar_config()
+    config, test_clicked, test_result = sidebar_config()
     render_header(config)
 
     status_box = st.empty()
@@ -900,13 +931,13 @@ def main_app():
             session = build_session(config)
             ok, message = test_connection(session, config)
             if ok:
-                st.sidebar.success(message)
+                test_result.success(message)
                 st.session_state.config_test_passed = True
             else:
-                st.sidebar.error(message)
+                test_result.error(message)
                 st.session_state.config_test_passed = False
         except Exception as exc:
-            st.sidebar.error(f"Error: connection failed. {exc}")
+            test_result.error(f"Error: connection failed. {exc}")
             st.session_state.config_test_passed = False
 
     col_left, col_right = st.columns([1, 1])
