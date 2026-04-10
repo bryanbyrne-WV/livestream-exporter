@@ -730,7 +730,6 @@ def render_login_screen():
     )
 
     st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
-
     st.markdown(
         """
         <div style="text-align:center; margin-bottom:10px;">
@@ -739,7 +738,6 @@ def render_login_screen():
         """,
         unsafe_allow_html=True,
     )
-
     st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
@@ -807,7 +805,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     else:
         api_base_url = st.sidebar.text_input(
             "API Base URL",
-            value=get_secret("WORKVIVO_API_BASE_URL", detected_api_url),
+            value="",
             help="Example: https://api.workvivo.com/v1",
         )
 
@@ -822,11 +820,12 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     test_result = st.sidebar.empty()
 
     st.sidebar.header("Filter")
-use_date_from = st.sidebar.checkbox("Use Date from")
-date_from_value = st.sidebar.date_input("Date from", value=None, disabled=not use_date_from)
 
-use_date_to = st.sidebar.checkbox("Use Date to")
-date_to_value = st.sidebar.date_input("Date to", value=None, disabled=not use_date_to)
+    use_date_from = st.sidebar.checkbox("Use Date from")
+    date_from_value = st.sidebar.date_input("Date from", value=None, disabled=not use_date_from)
+
+    use_date_to = st.sidebar.checkbox("Use Date to")
+    date_to_value = st.sidebar.date_input("Date to", value=None, disabled=not use_date_to)
 
     st.sidebar.header("Advanced")
     take = st.sidebar.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
@@ -877,8 +876,8 @@ def render_header(config: ExportConfig):
     )
 
     with st.expander("Current configuration", expanded=False):
-        st.write(f"**Workvivo ID:** `{config.workvivo_id}`")
-        st.write(f"**API Base URL:** `{config.api_base_url}`")
+        st.write(f"**Workvivo ID:** `{config.workvivo_id or 'None'}`")
+        st.write(f"**API Base URL:** `{config.api_base_url or 'None'}`")
         st.write(f"**Date from:** `{config.date_from.date() if config.date_from else 'None'}`")
         st.write(f"**Date to:** `{config.date_to.date() if config.date_to else 'None'}`")
 
@@ -993,7 +992,7 @@ def main_app():
         st.download_button(
             label="Download matched manifest CSV",
             data=manifest_csv,
-            file_name=f"livestream_export_manifest_{config.workvivo_id}.csv",
+            file_name=f"livestream_export_manifest_{config.workvivo_id or 'tenant'}.csv",
             mime="text/csv",
         )
 
@@ -1032,7 +1031,7 @@ def main_app():
         st.download_button(
             label="Download export results CSV",
             data=results_csv,
-            file_name=f"livestream_export_results_{config.workvivo_id}.csv",
+            file_name=f"livestream_export_results_{config.workvivo_id or 'tenant'}.csv",
             mime="text/csv",
         )
 
