@@ -621,6 +621,66 @@ def apply_global_branding():
                 color: #111827 !important;
             }
 
+            section[data-testid="stSidebar"] .stTextInput input,
+            section[data-testid="stSidebar"] .stNumberInput input,
+            section[data-testid="stSidebar"] .stDateInput input {
+                background-color: rgba(255, 255, 255, 0.96) !important;
+                border: 1px solid rgba(255,255,255,0.18) !important;
+                border-radius: 8px !important;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stSelectbox"] > div {
+                background-color: rgba(255, 255, 255, 0.96) !important;
+                border-radius: 8px !important;
+            }
+
+            section[data-testid="stSidebar"] details {
+                background: rgba(106, 81, 177, 0.95) !important;
+                border: 1px solid rgba(255,255,255,0.18) !important;
+                border-radius: 12px !important;
+                overflow: hidden;
+            }
+
+            section[data-testid="stSidebar"] details summary {
+                background: rgba(106, 81, 177, 0.95) !important;
+                color: white !important;
+                border-radius: 12px !important;
+            }
+
+            section[data-testid="stSidebar"] details[open] summary {
+                background: rgba(106, 81, 177, 0.95) !important;
+                color: white !important;
+                border-bottom: 1px solid rgba(255,255,255,0.12) !important;
+                border-radius: 12px 12px 0 0 !important;
+            }
+
+            section[data-testid="stSidebar"] details > div {
+                background: rgba(106, 81, 177, 0.95) !important;
+                color: white !important;
+                padding-top: 0.35rem;
+            }
+
+            section[data-testid="stSidebar"] button[kind="secondary"] {
+                border-radius: 10px !important;
+                border: none !important;
+                font-weight: 600 !important;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+                background-color: #F3F4F6;
+                color: #111827 !important;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+                background-color: #E5E7EB !important;
+                color: #111827 !important;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stButton"]:has(button:contains("Test connection")) > button {
+                background-color: #16A34A !important;
+                color: white !important;
+            }
+
             .main-title {
                 font-size: 2.2rem;
                 color: #5A3EA6;
@@ -641,6 +701,34 @@ def apply_global_branding():
                 background: rgba(255,255,255,0.72);
                 border: 1px solid rgba(60,79,168,0.08);
                 margin-bottom: 0.8rem;
+            }
+
+            div[data-baseweb="notification"] {
+                border-radius: 12px !important;
+            }
+
+            div[data-baseweb="notification"][kind="positive"] {
+                background-color: #DCFCE7 !important;
+                color: #166534 !important;
+                border: 1px solid #86EFAC !important;
+            }
+
+            div[data-baseweb="notification"][kind="negative"] {
+                background-color: #FEE2E2 !important;
+                color: #991B1B !important;
+                border: 1px solid #FCA5A5 !important;
+            }
+
+            div[data-baseweb="notification"][kind="warning"] {
+                background-color: #FEF3C7 !important;
+                color: #92400E !important;
+                border: 1px solid #FCD34D !important;
+            }
+
+            div[data-baseweb="notification"][kind="info"] {
+                background-color: #DBEAFE !important;
+                color: #1E40AF !important;
+                border: 1px solid #93C5FD !important;
             }
         </style>
         """,
@@ -769,7 +857,7 @@ def render_login_screen():
                 st.success("Logged in!")
                 st.rerun()
             else:
-                st.error("❌ Invalid username or password.")
+                st.error("Invalid username or password.")
 
         st.markdown(
             """
