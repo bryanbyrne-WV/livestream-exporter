@@ -716,7 +716,7 @@ def render_login_screen():
                 font-size: 1.05rem;
                 color: #6B56B0;
                 opacity: 0.8;
-                margin-bottom: 2.2rem;
+                margin-bottom: 2rem;
                 text-align: center;
             }
 
@@ -726,8 +726,8 @@ def render_login_screen():
                 border-bottom: 1px solid #8368D8 !important;
                 border-radius: 0 !important;
                 color: #4A2F8A !important;
-                padding: 0.6rem 0 !important;
-                font-size: 1.05rem;
+                padding: 0.55rem 0 !important;
+                font-size: 1rem !important;
                 box-shadow: none !important;
             }
 
@@ -737,20 +737,19 @@ def render_login_screen():
             }
 
             .blue-btn button {
-                width: 100%;
                 background-color: #3C4FA8 !important;
                 color: white !important;
                 border-radius: 8px !important;
-                height: 3rem;
+                height: 2.7rem;
                 font-weight: 600;
                 letter-spacing: 0.5px;
                 border: none !important;
-                margin-top: 1.8rem;
+                margin-top: 1.2rem;
             }
 
             .request-button {
                 display: inline-block;
-                margin-top: 1.6rem;
+                margin-top: 1.4rem;
                 font-size: 0.95rem;
                 color: #3C4FA8 !important;
                 text-decoration: underline;
@@ -781,35 +780,40 @@ def render_login_screen():
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="underline-input">', unsafe_allow_html=True)
-    username = st.text_input("Username", placeholder="Username", key="login_username")
-    password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
-    st.markdown('</div>', unsafe_allow_html=True)
+    form_left, form_mid, form_right = st.columns([1.2, 2.2, 1.2])
 
-    st.checkbox("Remember me", disabled=True, key="remember_me")
+    with form_mid:
+        st.markdown('<div class="underline-input">', unsafe_allow_html=True)
+        username = st.text_input("Username", placeholder="Username", key="login_username")
+        password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
-    login_button = st.button("LOGIN", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.checkbox("Remember me", disabled=True, key="remember_me")
 
-    if login_button:
-        if username == admin_username and password == admin_password:
-            st.session_state.authenticated = True
-            st.success("Logged in!")
-            st.rerun()
-        else:
-            st.error("❌ Invalid username or password.")
+        st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
+        login_button = st.button("LOGIN", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <a class="request-button"
-           href="https://support.workvivo.com/hc/en-gb/requests/new"
-           target="_blank">
-            Request Access
-        </a>
-        """,
-        unsafe_allow_html=True,
-    )
+        if login_button:
+            if username == admin_username and password == admin_password:
+                st.session_state.authenticated = True
+                st.success("Logged in!")
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password.")
+
+        st.markdown(
+            """
+            <div style="text-align:center;">
+                <a class="request-button"
+                   href="https://support.workvivo.com/hc/en-gb/requests/new"
+                   target="_blank">
+                    Request Access
+                </a>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown('</div>', unsafe_allow_html=True)
 
