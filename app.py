@@ -857,7 +857,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         type="password",
         value=get_secret("WORKVIVO_API_TOKEN", ""),
         placeholder="",
-        help="Provide via Streamlit secrets in production.",
+        help="API key created in Workvivo.",
     )
 
     test_clicked = st.sidebar.button("Test connection", use_container_width=True)
