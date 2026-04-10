@@ -53,7 +53,6 @@ MANIFEST_COLUMNS = [
     "permalink",
 ]
 
-# Use secrets in deployment if possible
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "ChangeMePlease!"
 
@@ -124,10 +123,6 @@ def get_next_page(payload: dict[str, Any]):
 
 
 def get_api_url_from_workvivo_id(wv_id: str) -> str:
-    """
-    Return likely API base URL based on Workvivo ID prefix.
-    Can still be overridden manually in the UI.
-    """
     if not wv_id or len(str(wv_id).strip()) < 3:
         return DEFAULT_API_BASE_URL
 
@@ -135,10 +130,8 @@ def get_api_url_from_workvivo_id(wv_id: str) -> str:
 
     if prefix == "100":
         return "https://api.workvivo.us/v1"
-
     if prefix == "300":
         return "https://api.eu2.workvivo.com/v1"
-
     if prefix == "400":
         return "https://api.us2.workvivo.us/v1"
 
@@ -442,9 +435,9 @@ def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bo
     try:
         payload = fetch_livestreams(session, config, skip=0, take=1)
         count = len(payload.get("data", []))
-        return True, f"Connection successful. Retrieved {count} record(s) from livestreams endpoint."
+        return True, f"Success: connection verified. Retrieved {count} record(s) from the livestreams endpoint."
     except Exception as exc:
-        return False, str(exc)
+        return False, f"Error: connection failed. {exc}"
 
 
 def collect_all_livestreams(
@@ -467,8 +460,7 @@ def collect_all_livestreams(
 
         collected.extend(livestreams)
         status_box.info(
-            f"Fetched page {page_number}: {len(livestreams)} livestreams "
-            f"(total {len(collected)})"
+            f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})"
         )
 
         next_page = get_next_page(payload)
@@ -631,14 +623,6 @@ def apply_global_branding():
                 color: #6B56B0;
                 opacity: 0.9;
                 margin-bottom: 1.2rem;
-            }
-
-            .metric-card {
-                background: rgba(255,255,255,0.7);
-                padding: 1rem;
-                border-radius: 16px;
-                border: 1px solid rgba(90, 62, 166, 0.08);
-                box-shadow: 0 8px 24px rgba(60, 79, 168, 0.08);
             }
 
             section[data-testid="stSidebar"] {
@@ -887,13 +871,11 @@ def render_header(config: ExportConfig):
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
     matched = len(rows)
     exported_ok = sum(
-        1
-        for row in exported_rows
+        1 for row in exported_rows
         if str(row.get("status", "")).startswith(("hls merged", "file downloaded"))
     )
     failed = sum(
-        1
-        for row in exported_rows
+        1 for row in exported_rows
         if str(row.get("status", "")).startswith("failed:")
     )
 
@@ -924,12 +906,12 @@ def main_app():
                 st.sidebar.error(message)
                 st.session_state.config_test_passed = False
         except Exception as exc:
-            st.sidebar.error(str(exc))
+            st.sidebar.error(f"Error: connection failed. {exc}")
             st.session_state.config_test_passed = False
 
     col_left, col_right = st.columns([1, 1])
     fetch_clicked = col_left.button("Fetch livestreams", use_container_width=True)
-    export_clicked = col_right.button("Export selected to ZIP", use_container_width=True)
+    export_clicked = col_right.button("Download selected to ZIP", use_container_width=True)
 
     if fetch_clicked:
         try:
@@ -978,7 +960,7 @@ def main_app():
             hide_index=True,
             disabled=[col for col in df.columns if col != "selected"],
             column_config={
-                "selected": st.column_config.CheckboxColumn("Export", help="Tick rows to export."),
+                "selected": st.column_config.CheckboxColumn("Export", help="Tick rows to include in the ZIP."),
                 "recording_url": st.column_config.TextColumn(width="medium"),
                 "permalink": st.column_config.TextColumn(width="medium"),
                 "description": st.column_config.TextColumn(width="large"),
@@ -1021,7 +1003,7 @@ def main_app():
                 )
 
                 status_box.success(
-                    f"Export complete. {len(results)} rows processed. ZIP bundle is ready to download."
+                    f"Success: {len(results)} row(s) processed. Your ZIP export is ready to download."
                 )
             except Exception as exc:
                 status_box.error(str(exc))
@@ -1042,7 +1024,7 @@ def main_app():
     if st.session_state.get("export_zip_bytes"):
         st.subheader("Download export bundle")
         st.download_button(
-            label="Download ZIP export",
+            label="Download selected to ZIP",
             data=st.session_state["export_zip_bytes"],
             file_name=st.session_state["export_zip_name"],
             mime="application/zip",
