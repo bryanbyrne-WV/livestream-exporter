@@ -636,6 +636,14 @@ def apply_global_branding():
                 padding: 0.9rem 1rem;
                 border: 1px solid rgba(60,79,168,0.08);
             }
+
+            .download-anchor {
+                padding: 1rem 1rem 0.4rem 1rem;
+                border-radius: 14px;
+                background: rgba(255,255,255,0.72);
+                border: 1px solid rgba(60,79,168,0.08);
+                margin-bottom: 0.8rem;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -659,27 +667,21 @@ def render_login_screen():
                 );
             }
 
-            .login-shell {
-                display: flex;
-                justify-content: center;
-                align-items: flex-start;
-                padding-top: 3rem;
-                padding-bottom: 2rem;
-            }
-
             .login-card {
-                width: 100%;
-                max-width: 430px;
-                background: rgba(255,255,255,0.88);
+                background: rgba(255,255,255,0.92);
                 border: 1px solid rgba(90, 62, 166, 0.10);
                 border-radius: 24px;
                 box-shadow: 0 18px 40px rgba(60, 79, 168, 0.12);
-                padding: 2rem 2rem 1.7rem 2rem;
+                padding: 2rem 2rem 1.6rem 2rem;
+                margin-top: 3rem;
             }
 
             .login-logo {
                 text-align: center;
                 margin-bottom: 0.5rem;
+                background: transparent !important;
+                box-shadow: none !important;
+                border: none !important;
             }
 
             .login-title {
@@ -687,7 +689,7 @@ def render_login_screen():
                 color: #5A3EA6;
                 font-weight: 700;
                 margin-bottom: 0.35rem;
-                margin-top: 0.5rem;
+                margin-top: 0.4rem;
                 text-align: center;
             }
 
@@ -699,22 +701,6 @@ def render_login_screen():
                 text-align: center;
             }
 
-            .underline-input input {
-                background: transparent !important;
-                border: none !important;
-                border-bottom: 1px solid #8368D8 !important;
-                border-radius: 0 !important;
-                color: #4A2F8A !important;
-                padding: 0.7rem 0 !important;
-                font-size: 1.02rem;
-                box-shadow: none !important;
-            }
-
-            .underline-input input::placeholder {
-                color: #9A84DD !important;
-                opacity: 0.65;
-            }
-
             .blue-btn button {
                 width: 100%;
                 background-color: #3C4FA8 !important;
@@ -724,7 +710,7 @@ def render_login_screen():
                 font-weight: 600;
                 letter-spacing: 0.4px;
                 border: none !important;
-                margin-top: 1.2rem;
+                margin-top: 1.1rem;
             }
 
             .request-button {
@@ -739,21 +725,25 @@ def render_login_screen():
             .request-wrapper {
                 text-align: center;
             }
+
+            div[data-testid="stTextInput"] label p {
+                color: #3f3f46 !important;
+                font-weight: 500;
+            }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    left, center, right = st.columns([1.2, 1.6, 1.2])
+    _, center, _ = st.columns([1.2, 1.6, 1.2])
 
     with center:
-        st.markdown('<div class="login-shell"><div class="login-card">', unsafe_allow_html=True)
+        st.markdown('<div class="login-card">', unsafe_allow_html=True)
 
         st.markdown(
             """
             <div class="login-logo">
-                <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png"
-                     style="height:120px;">
+                <img src="https://d3lkrqe5vfp7un.cloudfront.net/images/Picture4.png" style="height:110px;">
             </div>
             """,
             unsafe_allow_html=True,
@@ -765,12 +755,10 @@ def render_login_screen():
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div class="underline-input">', unsafe_allow_html=True)
         username = st.text_input("Username", placeholder="Username", key="login_username")
         password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.checkbox("Remember me", disabled=True)
+        st.checkbox("Remember me", disabled=True, key="remember_me")
 
         st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
         login_button = st.button("LOGIN", use_container_width=True)
@@ -797,7 +785,7 @@ def render_login_screen():
             unsafe_allow_html=True,
         )
 
-        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -942,7 +930,7 @@ def main_app():
 
     col_left, col_right = st.columns([1, 1])
     fetch_clicked = col_left.button("Fetch livestreams", use_container_width=True)
-    export_clicked = col_right.button("Download selected to ZIP", use_container_width=True)
+    export_clicked = col_right.button("Export livestreams", use_container_width=True)
 
     if fetch_clicked:
         try:
@@ -1034,7 +1022,7 @@ def main_app():
                 )
 
                 status_box.success(
-                    f"Success: {len(results)} row(s) processed. Your ZIP export is ready to download."
+                    f"Success: {len(results)} row(s) processed. Scroll down to download your ZIP export."
                 )
             except Exception as exc:
                 status_box.error(str(exc))
@@ -1053,7 +1041,15 @@ def main_app():
         )
 
     if st.session_state.get("export_zip_bytes"):
-        st.subheader("Download export bundle")
+        st.markdown(
+            """
+            <div class="download-anchor">
+                <h3 style="margin-bottom: 0.2rem; color: #5A3EA6;">Your export is ready</h3>
+                <p style="margin-top: 0; color: #6B56B0;">Download the ZIP bundle below.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.download_button(
             label="Download selected to ZIP",
             data=st.session_state["export_zip_bytes"],
