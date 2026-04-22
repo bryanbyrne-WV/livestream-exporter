@@ -5,7 +5,7 @@ import re
 import time
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -30,6 +30,7 @@ DEFAULT_TAKE = 100
 DEFAULT_REQUEST_TIMEOUT = 60
 DEFAULT_SLEEP_BETWEEN_REQUESTS = 0.2
 DEFAULT_CHUNK_SIZE = 1024 * 256
+DEFAULT_SPACE_BATCH_SIZE = 50
 
 MANIFEST_COLUMNS = [
     "livestream_id",
@@ -52,8 +53,6 @@ MANIFEST_COLUMNS = [
     "status",
     "permalink",
     "source_scope",
-    "source_space_id",
-    "source_space_name",
 ]
 
 DEFAULT_ADMIN_USERNAME = "admin"
@@ -85,6 +84,21 @@ def iso_to_datetime(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def datetime_to_unix_seconds(value: datetime | None, end_of_day: bool = False) -> int | None:
+    if value is None:
+        return None
+
+    if end_of_day:
+        value = value.replace(hour=23, minute=59, second=59, microsecond=0)
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+
+    return int(value.timestamp())
 
 
 def within_date_range(
@@ -141,18 +155,17 @@ def get_api_url_from_workvivo_id(wv_id: str) -> str:
     return DEFAULT_API_BASE_URL
 
 
-def normalize_endpoint_path(path: str) -> str:
-    path = (path or "").strip()
-    if not path:
-        return ""
-    return path if path.startswith("/") else f"/{path}"
-
-
 def safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
     except Exception:
         return default
+
+
+def chunk_list(values: list[str], size: int) -> list[list[str]]:
+    if size <= 0:
+        return [values]
+    return [values[i:i + size] for i in range(0, len(values), size)]
 
 
 # =========================================================
@@ -173,7 +186,7 @@ class ExportConfig:
     include_global_livestreams: bool = True
     include_space_livestreams: bool = True
     spaces_endpoint: str = "/spaces"
-    space_livestreams_endpoint_template: str = "/spaces/{space_id}/livestreams"
+    space_batch_size: int = DEFAULT_SPACE_BATCH_SIZE
 
 
 # =========================================================
@@ -263,8 +276,6 @@ def matches_filters(livestream: dict[str, Any], config: ExportConfig) -> bool:
 def livestream_to_manifest_row(
     livestream: dict[str, Any],
     source_scope: str = "global",
-    source_space_id: str = "",
-    source_space_name: str = "",
 ) -> dict[str, Any]:
     return {
         "livestream_id": str(livestream.get("id", "")),
@@ -287,8 +298,6 @@ def livestream_to_manifest_row(
         "status": "pending",
         "permalink": livestream.get("permalink", ""),
         "source_scope": source_scope,
-        "source_space_id": source_space_id,
-        "source_space_name": source_space_name,
     }
 
 
@@ -454,14 +463,54 @@ def fetch_json(
     return response.json()
 
 
-def fetch_livestreams(
+def build_livestream_params(
+    config: ExportConfig,
+    skip: int,
+    take: int,
+    in_spaces: str | None = None,
+    is_global: bool | None = None,
+    is_recorded: bool | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "skip": skip,
+        "take": take,
+    }
+
+    unix_from = datetime_to_unix_seconds(config.date_from, end_of_day=False)
+    unix_to = datetime_to_unix_seconds(config.date_to, end_of_day=True)
+
+    if unix_from is not None:
+        params["from"] = unix_from
+    if unix_to is not None:
+        params["to"] = unix_to
+    if in_spaces:
+        params["in_spaces"] = in_spaces
+    if is_global is not None:
+        params["is_global"] = str(is_global).lower()
+    if is_recorded is not None:
+        params["is_recorded"] = str(is_recorded).lower()
+
+    return params
+
+
+def fetch_livestreams_page(
     session: requests.Session,
     config: ExportConfig,
     skip: int,
     take: int,
+    in_spaces: str | None = None,
+    is_global: bool | None = None,
+    is_recorded: bool | None = None,
 ) -> dict[str, Any]:
     url = f"{config.api_base_url.rstrip('/')}/livestreams"
-    params = {"skip": skip, "take": take}
+    params = build_livestream_params(
+        config=config,
+        skip=skip,
+        take=take,
+        in_spaces=in_spaces,
+        is_global=is_global,
+        is_recorded=is_recorded,
+    )
     return fetch_json(session, url, params, config.request_timeout)
 
 
@@ -471,22 +520,7 @@ def fetch_spaces_page(
     skip: int,
     take: int,
 ) -> dict[str, Any]:
-    endpoint = normalize_endpoint_path(config.spaces_endpoint)
-    url = f"{config.api_base_url.rstrip('/')}{endpoint}"
-    params = {"skip": skip, "take": take}
-    return fetch_json(session, url, params, config.request_timeout)
-
-
-def fetch_space_livestreams_page(
-    session: requests.Session,
-    config: ExportConfig,
-    space_id: str,
-    skip: int,
-    take: int,
-) -> dict[str, Any]:
-    template = normalize_endpoint_path(config.space_livestreams_endpoint_template)
-    endpoint = template.format(space_id=space_id)
-    url = f"{config.api_base_url.rstrip('/')}{endpoint}"
+    url = f"{config.api_base_url.rstrip('/')}{config.spaces_endpoint}"
     params = {"skip": skip, "take": take}
     return fetch_json(session, url, params, config.request_timeout)
 
@@ -499,41 +533,6 @@ def extract_spaces_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
 def extract_livestreams_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
     data = payload.get("data", [])
     return data if isinstance(data, list) else []
-
-
-def collect_all_global_livestreams(
-    session: requests.Session,
-    config: ExportConfig,
-    status_box,
-    progress_bar,
-) -> list[dict[str, Any]]:
-    skip = 0
-    collected: list[dict[str, Any]] = []
-    page_number = 0
-
-    while True:
-        page_number += 1
-        payload = fetch_livestreams(session, config, skip=skip, take=config.take)
-        livestreams = extract_livestreams_list(payload)
-
-        if not livestreams:
-            break
-
-        collected.extend(livestreams)
-        status_box.info(
-            f"Fetched global livestream page {page_number}: "
-            f"{len(livestreams)} rows (total global {len(collected)})"
-        )
-
-        next_page = get_next_page(payload)
-        if next_page is None:
-            break
-
-        skip += config.take
-        progress_bar.progress(min(0.15 + (page_number * 0.02), 0.30))
-        time.sleep(config.sleep_between_requests)
-
-    return collected
 
 
 def collect_all_spaces(
@@ -556,8 +555,7 @@ def collect_all_spaces(
 
         collected.extend(spaces)
         status_box.info(
-            f"Fetched spaces page {page_number}: "
-            f"{len(spaces)} spaces (total {len(collected)})"
+            f"Fetched spaces page {page_number}: {len(spaces)} spaces (total {len(collected)})"
         )
 
         next_page = get_next_page(payload)
@@ -565,107 +563,82 @@ def collect_all_spaces(
             break
 
         skip += config.take
-        progress_bar.progress(min(0.30 + (page_number * 0.02), 0.45))
+        progress_bar.progress(min(0.25 + (page_number * 0.02), 0.40))
         time.sleep(config.sleep_between_requests)
 
     return collected
 
 
-def collect_all_space_livestreams(
+def collect_livestreams_by_query(
     session: requests.Session,
     config: ExportConfig,
-    spaces: list[dict[str, Any]],
     status_box,
     progress_bar,
-) -> tuple[list[dict[str, Any]], list[str]]:
+    label: str,
+    in_spaces: str | None = None,
+    is_global: bool | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 0.0,
+) -> list[dict[str, Any]]:
+    skip = 0
+    page_number = 0
     collected: list[dict[str, Any]] = []
-    warnings: list[str] = []
 
-    total_spaces = max(len(spaces), 1)
+    while True:
+        page_number += 1
+        payload = fetch_livestreams_page(
+            session=session,
+            config=config,
+            skip=skip,
+            take=config.take,
+            in_spaces=in_spaces,
+            is_global=is_global,
+            is_recorded=True,
+        )
+        livestreams = extract_livestreams_list(payload)
 
-    for space_index, space in enumerate(spaces, start=1):
-        space_id = str(space.get("id", "")).strip()
-        space_name = str(space.get("name", "")).strip()
+        if not livestreams:
+            break
 
-        if not space_id:
-            continue
-
+        collected.extend(livestreams)
         status_box.info(
-            f"Checking space {space_index}/{len(spaces)}: "
-            f"{space_name or space_id}"
+            f"Fetched {label} page {page_number}: {len(livestreams)} livestreams (total {len(collected)})"
         )
 
-        skip = 0
-        page_number = 0
+        next_page = get_next_page(payload)
+        if next_page is None:
+            break
 
-        while True:
-            page_number += 1
+        skip += config.take
 
-            try:
-                payload = fetch_space_livestreams_page(
-                    session=session,
-                    config=config,
-                    space_id=space_id,
-                    skip=skip,
-                    take=config.take,
-                )
-            except Exception as exc:
-                warnings.append(
-                    f"Space '{space_name or space_id}' could not be queried: {exc}"
-                )
-                break
+        if progress_end > progress_start:
+            progress_bar.progress(min(progress_start + (page_number * 0.03), progress_end))
 
-            livestreams = extract_livestreams_list(payload)
+        time.sleep(config.sleep_between_requests)
 
-            if not livestreams:
-                break
-
-            for item in livestreams:
-                if isinstance(item, dict):
-                    enriched = dict(item)
-                    enriched["_source_scope"] = "space"
-                    enriched["_source_space_id"] = space_id
-                    enriched["_source_space_name"] = space_name
-                    collected.append(enriched)
-
-            status_box.info(
-                f"Fetched space livestream page {page_number} for "
-                f"{space_name or space_id}: {len(livestreams)} rows"
-            )
-
-            next_page = get_next_page(payload)
-            if next_page is None:
-                break
-
-            skip += config.take
-            time.sleep(config.sleep_between_requests)
-
-        progress_bar.progress(min(0.45 + (space_index / total_spaces) * 0.35, 0.80))
-
-    return collected, warnings
+    return collected
 
 
 def deduplicate_livestreams(livestreams: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_id: dict[str, dict[str, Any]] = {}
+    seen: dict[str, dict[str, Any]] = {}
 
-    for livestream in livestreams:
-        livestream_id = str(livestream.get("id", "")).strip()
+    for item in livestreams:
+        livestream_id = str(item.get("id", "")).strip()
         if not livestream_id:
             continue
 
-        existing = by_id.get(livestream_id)
-
+        existing = seen.get(livestream_id)
         if existing is None:
-            by_id[livestream_id] = livestream
+            seen[livestream_id] = item
             continue
 
         existing_scope = existing.get("_source_scope", "global")
-        new_scope = livestream.get("_source_scope", "global")
+        new_scope = item.get("_source_scope", "global")
 
-        if existing_scope == "global" and new_scope == "space":
-            by_id[livestream_id] = livestream
+        if existing_scope == "global" and new_scope == "spaces":
+            seen[livestream_id] = item
 
-    return list(by_id.values())
+    return list(seen.values())
 
 
 def collect_all_livestreams(
@@ -674,23 +647,27 @@ def collect_all_livestreams(
     status_box,
     progress_bar,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    all_items: list[dict[str, Any]] = []
+    collected: list[dict[str, Any]] = []
     warnings: list[str] = []
 
     if config.include_global_livestreams:
-        global_items = collect_all_global_livestreams(
-            session=session,
-            config=config,
-            status_box=status_box,
-            progress_bar=progress_bar,
-        )
-        for item in global_items:
-            if isinstance(item, dict):
+        try:
+            global_items = collect_livestreams_by_query(
+                session=session,
+                config=config,
+                status_box=status_box,
+                progress_bar=progress_bar,
+                label="global livestreams",
+                is_global=True,
+                progress_start=0.05,
+                progress_end=0.25,
+            )
+            for item in global_items:
                 enriched = dict(item)
                 enriched["_source_scope"] = "global"
-                enriched["_source_space_id"] = ""
-                enriched["_source_space_name"] = ""
-                all_items.append(enriched)
+                collected.append(enriched)
+        except Exception as exc:
+            warnings.append(f"Global livestream fetch failed: {exc}")
 
     if config.include_space_livestreams:
         try:
@@ -701,23 +678,42 @@ def collect_all_livestreams(
                 progress_bar=progress_bar,
             )
 
-            if spaces:
-                space_items, space_warnings = collect_all_space_livestreams(
-                    session=session,
-                    config=config,
-                    spaces=spaces,
-                    status_box=status_box,
-                    progress_bar=progress_bar,
-                )
-                all_items.extend(space_items)
-                warnings.extend(space_warnings)
-            else:
-                warnings.append("No spaces were returned by the spaces endpoint.")
-        except Exception as exc:
-            warnings.append(f"Space discovery failed: {exc}")
+            space_ids = [
+                str(space.get("id")).strip()
+                for space in spaces
+                if str(space.get("id", "")).strip()
+            ]
 
-    deduped = deduplicate_livestreams(all_items)
-    progress_bar.progress(0.90)
+            if not space_ids:
+                warnings.append("No spaces were returned, so no space livestreams could be queried.")
+            else:
+                space_batches = chunk_list(space_ids, config.space_batch_size)
+                total_batches = max(len(space_batches), 1)
+
+                for batch_index, batch_ids in enumerate(space_batches, start=1):
+                    in_spaces = "|".join(batch_ids)
+
+                    batch_items = collect_livestreams_by_query(
+                        session=session,
+                        config=config,
+                        status_box=status_box,
+                        progress_bar=progress_bar,
+                        label=f"space livestreams batch {batch_index}/{len(space_batches)}",
+                        in_spaces=in_spaces,
+                        progress_start=0.40 + ((batch_index - 1) / total_batches) * 0.40,
+                        progress_end=0.40 + (batch_index / total_batches) * 0.40,
+                    )
+
+                    for item in batch_items:
+                        enriched = dict(item)
+                        enriched["_source_scope"] = "spaces"
+                        collected.append(enriched)
+
+        except Exception as exc:
+            warnings.append(f"Space livestream fetch failed: {exc}")
+
+    deduped = deduplicate_livestreams(collected)
+    progress_bar.progress(0.95)
     return deduped, warnings
 
 
@@ -725,11 +721,17 @@ def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bo
     messages: list[str] = []
 
     try:
-        payload = fetch_livestreams(session, config, skip=0, take=1)
+        payload = fetch_livestreams_page(
+            session=session,
+            config=config,
+            skip=0,
+            take=1,
+            is_recorded=True,
+        )
         count = len(payload.get("data", []))
-        messages.append(f"Global livestream endpoint OK ({count} row(s) returned).")
+        messages.append(f"Livestream endpoint OK ({count} row(s) returned).")
     except Exception as exc:
-        messages.append(f"Global livestream endpoint failed: {exc}")
+        messages.append(f"Livestream endpoint failed: {exc}")
 
     if config.include_space_livestreams:
         try:
@@ -1172,10 +1174,13 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
             value="/spaces",
             help="Default is /spaces",
         )
-        space_livestreams_endpoint_template = st.text_input(
-            "Space livestream endpoint template",
-            value="/spaces/{space_id}/livestreams",
-            help="Use {space_id} where the space ID should be inserted.",
+        space_batch_size = st.number_input(
+            "Space IDs per in_spaces batch",
+            min_value=1,
+            max_value=500,
+            value=50,
+            step=1,
+            help="Builds pipe-separated in_spaces values in batches.",
         )
 
     date_from = None
@@ -1199,8 +1204,8 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         force_manual_api_url=not auto_detect,
         include_global_livestreams=include_global_livestreams,
         include_space_livestreams=include_space_livestreams,
-        spaces_endpoint=spaces_endpoint.strip() or "/spaces",
-        space_livestreams_endpoint_template=space_livestreams_endpoint_template.strip() or "/spaces/{space_id}/livestreams",
+        spaces_endpoint=(spaces_endpoint.strip() or "/spaces"),
+        space_batch_size=int(space_batch_size),
     )
 
     return config, test_clicked, test_result
@@ -1221,7 +1226,7 @@ def render_header(config: ExportConfig):
         st.write(f"**Include global livestreams:** `{config.include_global_livestreams}`")
         st.write(f"**Include space livestreams:** `{config.include_space_livestreams}`")
         st.write(f"**Spaces endpoint:** `{config.spaces_endpoint}`")
-        st.write(f"**Space livestream endpoint template:** `{config.space_livestreams_endpoint_template}`")
+        st.write(f"**Space IDs per batch:** `{config.space_batch_size}`")
 
 
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
@@ -1280,8 +1285,6 @@ def main_app():
                 livestream_to_manifest_row(
                     livestream,
                     source_scope=livestream.get("_source_scope", "global"),
-                    source_space_id=livestream.get("_source_space_id", ""),
-                    source_space_name=livestream.get("_source_space_name", ""),
                 )
                 for livestream in all_livestreams
                 if matches_filters(livestream, config)
@@ -1334,7 +1337,6 @@ def main_app():
                 "permalink": st.column_config.TextColumn(width="medium"),
                 "description": st.column_config.TextColumn(width="large"),
                 "source_scope": st.column_config.TextColumn("Source Scope", width="small"),
-                "source_space_name": st.column_config.TextColumn("Source Space", width="medium"),
             },
             key="livestream_editor",
         )
