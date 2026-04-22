@@ -51,6 +51,9 @@ MANIFEST_COLUMNS = [
     "segment_count",
     "status",
     "permalink",
+    "source_scope",
+    "source_space_id",
+    "source_space_name",
 ]
 
 DEFAULT_ADMIN_USERNAME = "admin"
@@ -138,6 +141,20 @@ def get_api_url_from_workvivo_id(wv_id: str) -> str:
     return DEFAULT_API_BASE_URL
 
 
+def normalize_endpoint_path(path: str) -> str:
+    path = (path or "").strip()
+    if not path:
+        return ""
+    return path if path.startswith("/") else f"/{path}"
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
 # =========================================================
 # DATA MODEL
 # =========================================================
@@ -153,6 +170,10 @@ class ExportConfig:
     sleep_between_requests: float = DEFAULT_SLEEP_BETWEEN_REQUESTS
     chunk_size: int = DEFAULT_CHUNK_SIZE
     force_manual_api_url: bool = False
+    include_global_livestreams: bool = True
+    include_space_livestreams: bool = True
+    spaces_endpoint: str = "/spaces"
+    space_livestreams_endpoint_template: str = "/spaces/{space_id}/livestreams"
 
 
 # =========================================================
@@ -239,7 +260,12 @@ def matches_filters(livestream: dict[str, Any], config: ExportConfig) -> bool:
     return within_date_range(timestamp, config.date_from, config.date_to)
 
 
-def livestream_to_manifest_row(livestream: dict[str, Any]) -> dict[str, Any]:
+def livestream_to_manifest_row(
+    livestream: dict[str, Any],
+    source_scope: str = "global",
+    source_space_id: str = "",
+    source_space_name: str = "",
+) -> dict[str, Any]:
     return {
         "livestream_id": str(livestream.get("id", "")),
         "title": livestream.get("title") or "",
@@ -260,6 +286,9 @@ def livestream_to_manifest_row(livestream: dict[str, Any]) -> dict[str, Any]:
         "segment_count": "",
         "status": "pending",
         "permalink": livestream.get("permalink", ""),
+        "source_scope": source_scope,
+        "source_space_id": source_space_id,
+        "source_space_name": source_space_name,
     }
 
 
@@ -407,16 +436,13 @@ def export_hls_assets(
 # =========================================================
 # API CALLS
 # =========================================================
-def fetch_livestreams(
+def fetch_json(
     session: requests.Session,
-    config: ExportConfig,
-    skip: int,
-    take: int,
+    url: str,
+    params: dict[str, Any] | None,
+    timeout: int,
 ) -> dict[str, Any]:
-    url = f"{config.api_base_url.rstrip('/')}/livestreams"
-    params = {"skip": skip, "take": take}
-
-    response = session.get(url, params=params, timeout=config.request_timeout)
+    response = session.get(url, params=params, timeout=timeout)
 
     if not response.ok:
         raise RuntimeError(
@@ -428,16 +454,54 @@ def fetch_livestreams(
     return response.json()
 
 
-def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bool, str]:
-    try:
-        payload = fetch_livestreams(session, config, skip=0, take=1)
-        count = len(payload.get("data", []))
-        return True, f"Success: connection verified. Retrieved {count} record(s) from the livestreams endpoint."
-    except Exception as exc:
-        return False, f"Error: connection failed. {exc}"
+def fetch_livestreams(
+    session: requests.Session,
+    config: ExportConfig,
+    skip: int,
+    take: int,
+) -> dict[str, Any]:
+    url = f"{config.api_base_url.rstrip('/')}/livestreams"
+    params = {"skip": skip, "take": take}
+    return fetch_json(session, url, params, config.request_timeout)
 
 
-def collect_all_livestreams(
+def fetch_spaces_page(
+    session: requests.Session,
+    config: ExportConfig,
+    skip: int,
+    take: int,
+) -> dict[str, Any]:
+    endpoint = normalize_endpoint_path(config.spaces_endpoint)
+    url = f"{config.api_base_url.rstrip('/')}{endpoint}"
+    params = {"skip": skip, "take": take}
+    return fetch_json(session, url, params, config.request_timeout)
+
+
+def fetch_space_livestreams_page(
+    session: requests.Session,
+    config: ExportConfig,
+    space_id: str,
+    skip: int,
+    take: int,
+) -> dict[str, Any]:
+    template = normalize_endpoint_path(config.space_livestreams_endpoint_template)
+    endpoint = template.format(space_id=space_id)
+    url = f"{config.api_base_url.rstrip('/')}{endpoint}"
+    params = {"skip": skip, "take": take}
+    return fetch_json(session, url, params, config.request_timeout)
+
+
+def extract_spaces_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data", [])
+    return data if isinstance(data, list) else []
+
+
+def extract_livestreams_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data", [])
+    return data if isinstance(data, list) else []
+
+
+def collect_all_global_livestreams(
     session: requests.Session,
     config: ExportConfig,
     status_box,
@@ -450,23 +514,234 @@ def collect_all_livestreams(
     while True:
         page_number += 1
         payload = fetch_livestreams(session, config, skip=skip, take=config.take)
-        livestreams = payload.get("data", [])
+        livestreams = extract_livestreams_list(payload)
 
         if not livestreams:
             break
 
         collected.extend(livestreams)
-        status_box.info(f"Fetched page {page_number}: {len(livestreams)} livestreams (total {len(collected)})")
+        status_box.info(
+            f"Fetched global livestream page {page_number}: "
+            f"{len(livestreams)} rows (total global {len(collected)})"
+        )
 
         next_page = get_next_page(payload)
         if next_page is None:
             break
 
         skip += config.take
-        progress_bar.progress(min(0.2 + (page_number * 0.03), 0.35))
+        progress_bar.progress(min(0.15 + (page_number * 0.02), 0.30))
         time.sleep(config.sleep_between_requests)
 
     return collected
+
+
+def collect_all_spaces(
+    session: requests.Session,
+    config: ExportConfig,
+    status_box,
+    progress_bar,
+) -> list[dict[str, Any]]:
+    skip = 0
+    collected: list[dict[str, Any]] = []
+    page_number = 0
+
+    while True:
+        page_number += 1
+        payload = fetch_spaces_page(session, config, skip=skip, take=config.take)
+        spaces = extract_spaces_list(payload)
+
+        if not spaces:
+            break
+
+        collected.extend(spaces)
+        status_box.info(
+            f"Fetched spaces page {page_number}: "
+            f"{len(spaces)} spaces (total {len(collected)})"
+        )
+
+        next_page = get_next_page(payload)
+        if next_page is None:
+            break
+
+        skip += config.take
+        progress_bar.progress(min(0.30 + (page_number * 0.02), 0.45))
+        time.sleep(config.sleep_between_requests)
+
+    return collected
+
+
+def collect_all_space_livestreams(
+    session: requests.Session,
+    config: ExportConfig,
+    spaces: list[dict[str, Any]],
+    status_box,
+    progress_bar,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    collected: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    total_spaces = max(len(spaces), 1)
+
+    for space_index, space in enumerate(spaces, start=1):
+        space_id = str(space.get("id", "")).strip()
+        space_name = str(space.get("name", "")).strip()
+
+        if not space_id:
+            continue
+
+        status_box.info(
+            f"Checking space {space_index}/{len(spaces)}: "
+            f"{space_name or space_id}"
+        )
+
+        skip = 0
+        page_number = 0
+
+        while True:
+            page_number += 1
+
+            try:
+                payload = fetch_space_livestreams_page(
+                    session=session,
+                    config=config,
+                    space_id=space_id,
+                    skip=skip,
+                    take=config.take,
+                )
+            except Exception as exc:
+                warnings.append(
+                    f"Space '{space_name or space_id}' could not be queried: {exc}"
+                )
+                break
+
+            livestreams = extract_livestreams_list(payload)
+
+            if not livestreams:
+                break
+
+            for item in livestreams:
+                if isinstance(item, dict):
+                    enriched = dict(item)
+                    enriched["_source_scope"] = "space"
+                    enriched["_source_space_id"] = space_id
+                    enriched["_source_space_name"] = space_name
+                    collected.append(enriched)
+
+            status_box.info(
+                f"Fetched space livestream page {page_number} for "
+                f"{space_name or space_id}: {len(livestreams)} rows"
+            )
+
+            next_page = get_next_page(payload)
+            if next_page is None:
+                break
+
+            skip += config.take
+            time.sleep(config.sleep_between_requests)
+
+        progress_bar.progress(min(0.45 + (space_index / total_spaces) * 0.35, 0.80))
+
+    return collected, warnings
+
+
+def deduplicate_livestreams(livestreams: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+
+    for livestream in livestreams:
+        livestream_id = str(livestream.get("id", "")).strip()
+        if not livestream_id:
+            continue
+
+        existing = by_id.get(livestream_id)
+
+        if existing is None:
+            by_id[livestream_id] = livestream
+            continue
+
+        existing_scope = existing.get("_source_scope", "global")
+        new_scope = livestream.get("_source_scope", "global")
+
+        if existing_scope == "global" and new_scope == "space":
+            by_id[livestream_id] = livestream
+
+    return list(by_id.values())
+
+
+def collect_all_livestreams(
+    session: requests.Session,
+    config: ExportConfig,
+    status_box,
+    progress_bar,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    all_items: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    if config.include_global_livestreams:
+        global_items = collect_all_global_livestreams(
+            session=session,
+            config=config,
+            status_box=status_box,
+            progress_bar=progress_bar,
+        )
+        for item in global_items:
+            if isinstance(item, dict):
+                enriched = dict(item)
+                enriched["_source_scope"] = "global"
+                enriched["_source_space_id"] = ""
+                enriched["_source_space_name"] = ""
+                all_items.append(enriched)
+
+    if config.include_space_livestreams:
+        try:
+            spaces = collect_all_spaces(
+                session=session,
+                config=config,
+                status_box=status_box,
+                progress_bar=progress_bar,
+            )
+
+            if spaces:
+                space_items, space_warnings = collect_all_space_livestreams(
+                    session=session,
+                    config=config,
+                    spaces=spaces,
+                    status_box=status_box,
+                    progress_bar=progress_bar,
+                )
+                all_items.extend(space_items)
+                warnings.extend(space_warnings)
+            else:
+                warnings.append("No spaces were returned by the spaces endpoint.")
+        except Exception as exc:
+            warnings.append(f"Space discovery failed: {exc}")
+
+    deduped = deduplicate_livestreams(all_items)
+    progress_bar.progress(0.90)
+    return deduped, warnings
+
+
+def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bool, str]:
+    messages: list[str] = []
+
+    try:
+        payload = fetch_livestreams(session, config, skip=0, take=1)
+        count = len(payload.get("data", []))
+        messages.append(f"Global livestream endpoint OK ({count} row(s) returned).")
+    except Exception as exc:
+        messages.append(f"Global livestream endpoint failed: {exc}")
+
+    if config.include_space_livestreams:
+        try:
+            payload = fetch_spaces_page(session, config, skip=0, take=1)
+            count = len(payload.get("data", []))
+            messages.append(f"Spaces endpoint OK ({count} row(s) returned).")
+        except Exception as exc:
+            messages.append(f"Spaces endpoint failed: {exc}")
+
+    ok = any("OK" in msg for msg in messages)
+    prefix = "Success" if ok else "Error"
+    return ok, f"{prefix}: " + " ".join(messages)
 
 
 # =========================================================
@@ -586,6 +861,7 @@ def init_state():
     st.session_state.setdefault("export_zip_bytes", None)
     st.session_state.setdefault("export_zip_name", "")
     st.session_state.setdefault("config_test_passed", False)
+    st.session_state.setdefault("fetch_warnings", [])
 
 
 # =========================================================
@@ -871,6 +1147,10 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     use_date_to = st.sidebar.checkbox("Use Date to")
     date_to_value = st.sidebar.date_input("Date to", value=None, disabled=not use_date_to)
 
+    st.sidebar.header("Scope")
+    include_global_livestreams = st.sidebar.checkbox("Include global livestreams", value=True)
+    include_space_livestreams = st.sidebar.checkbox("Include space livestreams", value=True)
+
     with st.sidebar.expander("Advanced", expanded=False):
         take = st.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
         request_timeout = st.number_input(
@@ -886,6 +1166,16 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
             max_value=5.0,
             value=0.2,
             step=0.1,
+        )
+        spaces_endpoint = st.text_input(
+            "Spaces endpoint",
+            value="/spaces",
+            help="Default is /spaces",
+        )
+        space_livestreams_endpoint_template = st.text_input(
+            "Space livestream endpoint template",
+            value="/spaces/{space_id}/livestreams",
+            help="Use {space_id} where the space ID should be inserted.",
         )
 
     date_from = None
@@ -907,6 +1197,10 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         request_timeout=int(request_timeout),
         sleep_between_requests=float(sleep_between_requests),
         force_manual_api_url=not auto_detect,
+        include_global_livestreams=include_global_livestreams,
+        include_space_livestreams=include_space_livestreams,
+        spaces_endpoint=spaces_endpoint.strip() or "/spaces",
+        space_livestreams_endpoint_template=space_livestreams_endpoint_template.strip() or "/spaces/{space_id}/livestreams",
     )
 
     return config, test_clicked, test_result
@@ -924,6 +1218,10 @@ def render_header(config: ExportConfig):
         st.write(f"**API Base URL:** `{config.api_base_url or 'None'}`")
         st.write(f"**Date from:** `{config.date_from.date() if config.date_from else 'None'}`")
         st.write(f"**Date to:** `{config.date_to.date() if config.date_to else 'None'}`")
+        st.write(f"**Include global livestreams:** `{config.include_global_livestreams}`")
+        st.write(f"**Include space livestreams:** `{config.include_space_livestreams}`")
+        st.write(f"**Spaces endpoint:** `{config.spaces_endpoint}`")
+        st.write(f"**Space livestream endpoint template:** `{config.space_livestreams_endpoint_template}`")
 
 
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
@@ -975,10 +1273,16 @@ def main_app():
         try:
             validate_config(config)
             session = build_session(config)
-            all_livestreams = collect_all_livestreams(session, config, status_box, progress_bar)
+
+            all_livestreams, warnings = collect_all_livestreams(session, config, status_box, progress_bar)
 
             filtered_rows = [
-                livestream_to_manifest_row(livestream)
+                livestream_to_manifest_row(
+                    livestream,
+                    source_scope=livestream.get("_source_scope", "global"),
+                    source_space_id=livestream.get("_source_space_id", ""),
+                    source_space_name=livestream.get("_source_space_name", ""),
+                )
                 for livestream in all_livestreams
                 if matches_filters(livestream, config)
             ]
@@ -988,10 +1292,11 @@ def main_app():
             st.session_state["export_results"] = []
             st.session_state["export_zip_bytes"] = None
             st.session_state["export_zip_name"] = ""
+            st.session_state["fetch_warnings"] = warnings
 
             progress_bar.progress(1.0)
             status_box.success(
-                f"Fetched {len(all_livestreams)} livestreams. "
+                f"Fetched {len(all_livestreams)} unique livestreams. "
                 f"{len(filtered_rows)} matched the recorded/date filters."
             )
         except Exception as exc:
@@ -999,13 +1304,19 @@ def main_app():
 
     rows = st.session_state.get("fetched_rows", [])
     export_results = st.session_state.get("export_results", [])
+    fetch_warnings = st.session_state.get("fetch_warnings", [])
+
+    if fetch_warnings:
+        with st.expander("Fetch warnings", expanded=False):
+            for warning in fetch_warnings:
+                st.warning(warning)
 
     if rows:
         render_summary(rows, export_results)
 
         st.subheader("Matched livestreams")
         st.write(
-            f"Total livestreams fetched: **{st.session_state.get('last_fetch_count', 0)}**  \n"
+            f"Total unique livestreams fetched: **{st.session_state.get('last_fetch_count', 0)}**  \n"
             f"Matched recorded livestreams: **{len(rows)}**"
         )
 
@@ -1022,6 +1333,8 @@ def main_app():
                 "recording_url": st.column_config.TextColumn(width="medium"),
                 "permalink": st.column_config.TextColumn(width="medium"),
                 "description": st.column_config.TextColumn(width="large"),
+                "source_scope": st.column_config.TextColumn("Source Scope", width="small"),
+                "source_space_name": st.column_config.TextColumn("Source Space", width="medium"),
             },
             key="livestream_editor",
         )
