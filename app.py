@@ -155,13 +155,6 @@ def get_api_url_from_workvivo_id(wv_id: str) -> str:
     return DEFAULT_API_BASE_URL
 
 
-def safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
 def chunk_list(values: list[str], size: int) -> list[list[str]]:
     if size <= 0:
         return [values]
@@ -864,6 +857,8 @@ def init_state():
     st.session_state.setdefault("export_zip_name", "")
     st.session_state.setdefault("config_test_passed", False)
     st.session_state.setdefault("fetch_warnings", [])
+    st.session_state.setdefault("selection_mode", "none")
+    st.session_state.setdefault("selection_version", 0)
 
 
 # =========================================================
@@ -1296,6 +1291,8 @@ def main_app():
             st.session_state["export_zip_bytes"] = None
             st.session_state["export_zip_name"] = ""
             st.session_state["fetch_warnings"] = warnings
+            st.session_state["selection_mode"] = "none"
+            st.session_state["selection_version"] += 1
 
             progress_bar.progress(1.0)
             status_box.success(
@@ -1323,8 +1320,25 @@ def main_app():
             f"Matched recorded livestreams: **{len(rows)}**"
         )
 
-        df = pd.DataFrame(rows)
-        df.insert(0, "selected", True)
+        action_col1, action_col2, action_col3 = st.columns([1, 1, 6])
+
+        with action_col1:
+            if st.button("Select all", use_container_width=True):
+                st.session_state["selection_mode"] = "all"
+                st.session_state["selection_version"] += 1
+
+        with action_col2:
+            if st.button("Deselect all", use_container_width=True):
+                st.session_state["selection_mode"] = "none"
+                st.session_state["selection_version"] += 1
+
+        selection_mode = st.session_state.get("selection_mode", "none")
+        default_selected = selection_mode == "all"
+
+        df = pd.DataFrame(rows).copy()
+        df.insert(0, "selected", default_selected)
+
+        editor_key = f"livestream_editor_{st.session_state.get('selection_version', 0)}"
 
         edited_df = st.data_editor(
             df,
@@ -1332,13 +1346,17 @@ def main_app():
             hide_index=True,
             disabled=[col for col in df.columns if col != "selected"],
             column_config={
-                "selected": st.column_config.CheckboxColumn("Export", help="Tick rows to include in the ZIP."),
+                "selected": st.column_config.CheckboxColumn(
+                    "Export",
+                    help="Tick rows to include in the ZIP.",
+                    default=False,
+                ),
                 "recording_url": st.column_config.TextColumn(width="medium"),
                 "permalink": st.column_config.TextColumn(width="medium"),
                 "description": st.column_config.TextColumn(width="large"),
                 "source_scope": st.column_config.TextColumn("Source Scope", width="small"),
             },
-            key="livestream_editor",
+            key=editor_key,
         )
 
         selected_rows = (
@@ -1346,6 +1364,8 @@ def main_app():
             .drop(columns=["selected"])
             .to_dict(orient="records")
         )
+
+        st.caption(f"Selected for export: {len(selected_rows)}")
 
         manifest_csv = dataframe_to_csv_bytes(pd.DataFrame(rows, columns=MANIFEST_COLUMNS))
         st.download_button(
