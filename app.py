@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import csv
 import io
+import os
 import re
 import time
 import zipfile
@@ -55,8 +56,8 @@ MANIFEST_COLUMNS = [
     "source_scope",
 ]
 
-DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "Cops123!"
+DEFAULT_ADMIN_USERNAME = ""
+DEFAULT_ADMIN_PASSWORD = ""
 
 
 # =========================================================
@@ -68,7 +69,7 @@ def get_secret(name: str, default: str = "") -> str:
             return str(st.secrets[name])
     except Exception:
         pass
-    return default
+    return os.getenv(name, default)
 
 
 def sanitize_filename(filename: str) -> str:
@@ -110,12 +111,15 @@ def within_date_range(
     if dt is None:
         return False
 
-    dt_naive = dt.replace(tzinfo=None)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
 
-    if date_from and dt_naive < date_from:
+    if date_from and dt < date_from:
         return False
 
-    if date_to and dt_naive > date_to.replace(hour=23, minute=59, second=59):
+    if date_to and dt > date_to.replace(hour=23, minute=59, second=59, microsecond=0):
         return False
 
     return True
@@ -205,6 +209,10 @@ def validate_config(config: ExportConfig) -> None:
         raise ValueError("Set Workvivo ID.")
     if not config.api_token:
         raise ValueError("Set API token.")
+    if not config.include_global_livestreams and not config.include_space_livestreams:
+        raise ValueError("Enable at least one livestream scope.")
+    if config.date_from and config.date_to and config.date_from > config.date_to:
+        raise ValueError("Date from cannot be after Date to.")
 
 
 # =========================================================
@@ -710,10 +718,13 @@ def collect_all_livestreams(
     return deduped, warnings
 
 
-def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bool, str]:
+def test_connection(session: requests.Session, config: ExportConfig) -> tuple[str, str]:
     messages: list[str] = []
+    failures = 0
+    checks = 0
 
     try:
+        checks += 1
         payload = fetch_livestreams_page(
             session=session,
             config=config,
@@ -724,19 +735,30 @@ def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bo
         count = len(payload.get("data", []))
         messages.append(f"Livestream endpoint OK ({count} row(s) returned).")
     except Exception as exc:
+        failures += 1
         messages.append(f"Livestream endpoint failed: {exc}")
 
     if config.include_space_livestreams:
         try:
+            checks += 1
             payload = fetch_spaces_page(session, config, skip=0, take=1)
             count = len(payload.get("data", []))
             messages.append(f"Spaces endpoint OK ({count} row(s) returned).")
         except Exception as exc:
+            failures += 1
             messages.append(f"Spaces endpoint failed: {exc}")
 
-    ok = any("OK" in msg for msg in messages)
-    prefix = "Success" if ok else "Error"
-    return ok, f"{prefix}: " + " ".join(messages)
+    if failures == 0:
+        status = "success"
+        prefix = "Success"
+    elif failures < checks:
+        status = "warning"
+        prefix = "Warning"
+    else:
+        status = "error"
+        prefix = "Error"
+
+    return status, f"{prefix}: " + " ".join(messages)
 
 
 # =========================================================
@@ -859,6 +881,7 @@ def init_state():
     st.session_state.setdefault("fetch_warnings", [])
     st.session_state.setdefault("selection_mode", "none")
     st.session_state.setdefault("selection_version", 0)
+    st.session_state.setdefault("selected_livestream_ids", [])
 
 
 # =========================================================
@@ -1056,6 +1079,13 @@ def render_login_screen():
     form_left, form_mid, form_right = st.columns([1.2, 2.2, 1.2])
 
     with form_mid:
+        if not admin_username or not admin_password:
+            st.error(
+                "Login is not configured. Set APP_ADMIN_USERNAME and APP_ADMIN_PASSWORD "
+                "in Streamlit secrets or environment variables."
+            )
+            return
+
         st.markdown('<div class="underline-input">', unsafe_allow_html=True)
         username = st.text_input("Username", placeholder="Username", key="login_username")
         password = st.text_input("Password", placeholder="Password", type="password", key="login_password")
@@ -1182,10 +1212,10 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
     date_to = None
 
     if use_date_from and date_from_value:
-        date_from = datetime.combine(date_from_value, dt_time.min)
+        date_from = datetime.combine(date_from_value, dt_time.min).replace(tzinfo=timezone.utc)
 
     if use_date_to and date_to_value:
-        date_to = datetime.combine(date_to_value, dt_time.min)
+        date_to = datetime.combine(date_to_value, dt_time.min).replace(tzinfo=timezone.utc)
 
     config = ExportConfig(
         api_base_url=api_base_url.strip().rstrip("/"),
@@ -1254,10 +1284,13 @@ def main_app():
         try:
             validate_config(config)
             session = build_session(config)
-            ok, message = test_connection(session, config)
-            if ok:
+            status, message = test_connection(session, config)
+            if status == "success":
                 test_result.success(message)
                 st.session_state.config_test_passed = True
+            elif status == "warning":
+                test_result.warning(message)
+                st.session_state.config_test_passed = False
             else:
                 test_result.error(message)
                 st.session_state.config_test_passed = False
@@ -1293,6 +1326,7 @@ def main_app():
             st.session_state["fetch_warnings"] = warnings
             st.session_state["selection_mode"] = "none"
             st.session_state["selection_version"] += 1
+            st.session_state["selected_livestream_ids"] = []
 
             progress_bar.progress(1.0)
             status_box.success(
@@ -1320,23 +1354,34 @@ def main_app():
             f"Matched recorded livestreams: **{len(rows)}**"
         )
 
+        available_ids = {str(row.get("livestream_id", "")) for row in rows}
+        stored_selected_ids = [
+            livestream_id
+            for livestream_id in st.session_state.get("selected_livestream_ids", [])
+            if livestream_id in available_ids
+        ]
+        st.session_state["selected_livestream_ids"] = stored_selected_ids
+
         action_col1, action_col2, action_col3 = st.columns([1, 1, 6])
 
         with action_col1:
             if st.button("Select all", use_container_width=True):
                 st.session_state["selection_mode"] = "all"
+                st.session_state["selected_livestream_ids"] = list(available_ids)
                 st.session_state["selection_version"] += 1
 
         with action_col2:
             if st.button("Deselect all", use_container_width=True):
                 st.session_state["selection_mode"] = "none"
+                st.session_state["selected_livestream_ids"] = []
                 st.session_state["selection_version"] += 1
 
-        selection_mode = st.session_state.get("selection_mode", "none")
-        default_selected = selection_mode == "all"
-
         df = pd.DataFrame(rows).copy()
-        df.insert(0, "selected", default_selected)
+        df.insert(
+            0,
+            "selected",
+            df["livestream_id"].astype(str).isin(st.session_state["selected_livestream_ids"]),
+        )
 
         editor_key = f"livestream_editor_{st.session_state.get('selection_version', 0)}"
 
@@ -1364,6 +1409,10 @@ def main_app():
             .drop(columns=["selected"])
             .to_dict(orient="records")
         )
+        st.session_state["selected_livestream_ids"] = [
+            str(row["livestream_id"])
+            for row in selected_rows
+        ]
 
         st.caption(f"Selected for export: {len(selected_rows)}")
 
