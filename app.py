@@ -415,9 +415,11 @@ def export_hls_assets(
 
     with open(destination, "wb") as outfile:
         total = len(segment_urls)
+
         for index, segment_url in enumerate(segment_urls, start=1):
             with session.get(segment_url, stream=True, timeout=timeout) as response:
                 response.raise_for_status()
+
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
                         outfile.write(chunk)
@@ -474,12 +476,16 @@ def build_livestream_params(
 
     if unix_from is not None:
         params["from"] = unix_from
+
     if unix_to is not None:
         params["to"] = unix_to
+
     if in_spaces:
         params["in_spaces"] = in_spaces
+
     if is_global is not None:
         params["is_global"] = str(is_global).lower()
+
     if is_recorded is not None:
         params["is_recorded"] = str(is_recorded).lower()
 
@@ -548,7 +554,8 @@ def collect_all_spaces(
 
         collected.extend(spaces)
         status_box.info(
-            f"Fetched spaces page {page_number}: {len(spaces)} spaces (total {len(collected)})"
+            f"Fetched spaces page {page_number}: {len(spaces)} spaces "
+            f"(total {len(collected)})"
         )
 
         next_page = get_next_page(payload)
@@ -588,6 +595,7 @@ def collect_livestreams_by_query(
             is_global=is_global,
             is_recorded=True,
         )
+
         livestreams = extract_livestreams_list(payload)
 
         if not livestreams:
@@ -595,7 +603,8 @@ def collect_livestreams_by_query(
 
         collected.extend(livestreams)
         status_box.info(
-            f"Fetched {label} page {page_number}: {len(livestreams)} livestreams (total {len(collected)})"
+            f"Fetched {label} page {page_number}: {len(livestreams)} livestreams "
+            f"(total {len(collected)})"
         )
 
         next_page = get_next_page(payload)
@@ -617,10 +626,12 @@ def deduplicate_livestreams(livestreams: list[dict[str, Any]]) -> list[dict[str,
 
     for item in livestreams:
         livestream_id = str(item.get("id", "")).strip()
+
         if not livestream_id:
             continue
 
         existing = seen.get(livestream_id)
+
         if existing is None:
             seen[livestream_id] = item
             continue
@@ -655,10 +666,12 @@ def collect_all_livestreams(
                 progress_start=0.05,
                 progress_end=0.25,
             )
+
             for item in global_items:
                 enriched = dict(item)
                 enriched["_source_scope"] = "global"
                 collected.append(enriched)
+
         except Exception as exc:
             warnings.append(f"Global livestream fetch failed: {exc}")
 
@@ -707,6 +720,7 @@ def collect_all_livestreams(
 
     deduped = deduplicate_livestreams(collected)
     progress_bar.progress(0.95)
+
     return deduped, warnings
 
 
@@ -736,6 +750,7 @@ def test_connection(session: requests.Session, config: ExportConfig) -> tuple[bo
 
     ok = any("OK" in msg for msg in messages)
     prefix = "Success" if ok else "Error"
+
     return ok, f"{prefix}: " + " ".join(messages)
 
 
@@ -748,11 +763,15 @@ def export_selected_livestreams_to_zip(
     selected_rows: list[dict[str, Any]],
     status_box,
     progress_bar,
-) -> tuple[list[dict[str, Any]], bytes]:
+) -> tuple[list[dict[str, Any]], str]:
     results: list[dict[str, Any]] = []
 
     if not selected_rows:
         raise ValueError("No rows selected for export.")
+
+    zip_path = Path("/tmp") / (
+        f"livestream_export_{config.workvivo_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    )
 
     with TemporaryDirectory() as temp_dir:
         export_root = Path(temp_dir) / f"Exported_Livestreams_{config.workvivo_id}"
@@ -834,15 +853,13 @@ def export_selected_livestreams_to_zip(
         manifest_path = export_root / f"livestream_export_manifest_{config.workvivo_id}.csv"
         results_df.to_csv(manifest_path, index=False, quoting=csv.QUOTE_MINIMAL)
 
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for file_path in export_root.rglob("*"):
                 if file_path.is_file():
                     arcname = file_path.relative_to(export_root.parent)
                     zf.write(file_path, arcname=str(arcname))
 
-        zip_buffer.seek(0)
-        return results, zip_buffer.getvalue()
+    return results, str(zip_path)
 
 
 # =========================================================
@@ -853,7 +870,7 @@ def init_state():
     st.session_state.setdefault("fetched_rows", [])
     st.session_state.setdefault("export_results", [])
     st.session_state.setdefault("last_fetch_count", 0)
-    st.session_state.setdefault("export_zip_bytes", None)
+    st.session_state.setdefault("export_zip_path", "")
     st.session_state.setdefault("export_zip_name", "")
     st.session_state.setdefault("config_test_passed", False)
     st.session_state.setdefault("fetch_warnings", [])
@@ -1039,6 +1056,7 @@ def render_login_screen():
     )
 
     st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+
     st.markdown(
         """
         <div style="text-align:center; margin-bottom:10px;">
@@ -1047,6 +1065,7 @@ def render_login_screen():
         """,
         unsafe_allow_html=True,
     )
+
     st.markdown('<div class="login-title">User Login</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="login-note">Please sign in to access the Livestream Export Tool</div>',
@@ -1064,7 +1083,7 @@ def render_login_screen():
         st.checkbox("Remember me", disabled=True, key="remember_me")
 
         st.markdown('<div class="blue-btn">', unsafe_allow_html=True)
-        login_button = st.button("LOGIN", use_container_width=True)
+        login_button = st.button("LOGIN", width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
 
         if login_button:
@@ -1133,7 +1152,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
         help="API key created in Workvivo.",
     )
 
-    test_clicked = st.sidebar.button("Test connection", use_container_width=True)
+    test_clicked = st.sidebar.button("Test connection", width="stretch")
     test_result = st.sidebar.empty()
 
     st.sidebar.header("Filter")
@@ -1150,6 +1169,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
 
     with st.sidebar.expander("Advanced", expanded=False):
         take = st.number_input("Page size", min_value=1, max_value=500, value=100, step=1)
+
         request_timeout = st.number_input(
             "Request timeout (seconds)",
             min_value=5,
@@ -1157,6 +1177,7 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
             value=60,
             step=5,
         )
+
         sleep_between_requests = st.number_input(
             "Delay between API requests (seconds)",
             min_value=0.0,
@@ -1164,11 +1185,13 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
             value=0.2,
             step=0.1,
         )
+
         spaces_endpoint = st.text_input(
             "Spaces endpoint",
             value="/spaces",
             help="Default is /spaces",
         )
+
         space_batch_size = st.number_input(
             "Space IDs per in_spaces batch",
             min_value=1,
@@ -1207,7 +1230,11 @@ def sidebar_config() -> tuple[ExportConfig, bool, Any]:
 
 
 def render_header(config: ExportConfig):
-    st.markdown('<div class="main-title">🎥 Workvivo Livestream Exporter</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-title">🎥 Workvivo Livestream Exporter</div>',
+        unsafe_allow_html=True,
+    )
+
     st.markdown(
         '<div class="main-subtitle">Fetch recorded livestreams, review them, and download a ZIP export bundle.</div>',
         unsafe_allow_html=True,
@@ -1226,10 +1253,12 @@ def render_header(config: ExportConfig):
 
 def render_summary(rows: list[dict[str, Any]], exported_rows: list[dict[str, Any]]):
     matched = len(rows)
+
     exported_ok = sum(
         1 for row in exported_rows
         if str(row.get("status", "")).startswith(("hls merged", "file downloaded"))
     )
+
     failed = sum(
         1 for row in exported_rows
         if str(row.get("status", "")).startswith("failed:")
@@ -1255,26 +1284,34 @@ def main_app():
             validate_config(config)
             session = build_session(config)
             ok, message = test_connection(session, config)
+
             if ok:
                 test_result.success(message)
                 st.session_state.config_test_passed = True
             else:
                 test_result.error(message)
                 st.session_state.config_test_passed = False
+
         except Exception as exc:
             test_result.error(f"Error: connection failed. {exc}")
             st.session_state.config_test_passed = False
 
     col_left, col_right = st.columns([1, 1])
-    fetch_clicked = col_left.button("Fetch livestreams", use_container_width=True)
-    export_clicked = col_right.button("Export livestreams", use_container_width=True)
+
+    fetch_clicked = col_left.button("Fetch livestreams", width="stretch")
+    export_clicked = col_right.button("Export livestreams", width="stretch")
 
     if fetch_clicked:
         try:
             validate_config(config)
             session = build_session(config)
 
-            all_livestreams, warnings = collect_all_livestreams(session, config, status_box, progress_bar)
+            all_livestreams, warnings = collect_all_livestreams(
+                session,
+                config,
+                status_box,
+                progress_bar,
+            )
 
             filtered_rows = [
                 livestream_to_manifest_row(
@@ -1288,19 +1325,22 @@ def main_app():
             st.session_state["fetched_rows"] = filtered_rows
             st.session_state["last_fetch_count"] = len(all_livestreams)
             st.session_state["export_results"] = []
-            st.session_state["export_zip_bytes"] = None
+            st.session_state["export_zip_path"] = ""
             st.session_state["export_zip_name"] = ""
             st.session_state["fetch_warnings"] = warnings
             st.session_state["selection_mode"] = "none"
             st.session_state["selection_version"] += 1
 
             progress_bar.progress(1.0)
+
             status_box.success(
                 f"Fetched {len(all_livestreams)} unique livestreams. "
                 f"{len(filtered_rows)} matched the recorded/date filters."
             )
+
         except Exception as exc:
             status_box.error(str(exc))
+            st.exception(exc)
 
     rows = st.session_state.get("fetched_rows", [])
     export_results = st.session_state.get("export_results", [])
@@ -1315,6 +1355,7 @@ def main_app():
         render_summary(rows, export_results)
 
         st.subheader("Matched livestreams")
+
         st.write(
             f"Total unique livestreams fetched: **{st.session_state.get('last_fetch_count', 0)}**  \n"
             f"Matched recorded livestreams: **{len(rows)}**"
@@ -1323,12 +1364,12 @@ def main_app():
         action_col1, action_col2, action_col3 = st.columns([1, 1, 6])
 
         with action_col1:
-            if st.button("Select all", use_container_width=True):
+            if st.button("Select all", width="stretch"):
                 st.session_state["selection_mode"] = "all"
                 st.session_state["selection_version"] += 1
 
         with action_col2:
-            if st.button("Deselect all", use_container_width=True):
+            if st.button("Deselect all", width="stretch"):
                 st.session_state["selection_mode"] = "none"
                 st.session_state["selection_version"] += 1
 
@@ -1342,7 +1383,7 @@ def main_app():
 
         edited_df = st.data_editor(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             disabled=[col for col in df.columns if col != "selected"],
             column_config={
@@ -1368,6 +1409,7 @@ def main_app():
         st.caption(f"Selected for export: {len(selected_rows)}")
 
         manifest_csv = dataframe_to_csv_bytes(pd.DataFrame(rows, columns=MANIFEST_COLUMNS))
+
         st.download_button(
             label="Download matched manifest CSV",
             data=manifest_csv,
@@ -1381,7 +1423,8 @@ def main_app():
                 session = build_session(config)
 
                 progress_bar.progress(0.0)
-                results, zip_bytes = export_selected_livestreams_to_zip(
+
+                results, zip_path = export_selected_livestreams_to_zip(
                     session=session,
                     config=config,
                     selected_rows=selected_rows,
@@ -1390,23 +1433,31 @@ def main_app():
                 )
 
                 st.session_state["export_results"] = results
-                st.session_state["export_zip_bytes"] = zip_bytes
-                st.session_state["export_zip_name"] = (
-                    f"livestream_export_{config.workvivo_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-                )
+                st.session_state["export_zip_path"] = zip_path
+                st.session_state["export_zip_name"] = Path(zip_path).name
 
                 status_box.success(
-                    f"Success: {len(results)} row(s) processed. Scroll down to download your ZIP export."
+                    f"Success: {len(results)} row(s) processed. "
+                    f"Scroll down to download your ZIP export."
                 )
+
             except Exception as exc:
                 status_box.error(str(exc))
+                st.exception(exc)
 
     if st.session_state.get("export_results"):
         st.subheader("Export results")
+
         results_df = pd.DataFrame(st.session_state["export_results"], columns=MANIFEST_COLUMNS)
-        st.dataframe(results_df, use_container_width=True, hide_index=True)
+
+        st.dataframe(
+            results_df,
+            width="stretch",
+            hide_index=True,
+        )
 
         results_csv = dataframe_to_csv_bytes(results_df)
+
         st.download_button(
             label="Download export results CSV",
             data=results_csv,
@@ -1414,7 +1465,7 @@ def main_app():
             mime="text/csv",
         )
 
-    if st.session_state.get("export_zip_bytes"):
+    if st.session_state.get("export_zip_path"):
         st.markdown(
             """
             <div class="download-anchor">
@@ -1424,13 +1475,20 @@ def main_app():
             """,
             unsafe_allow_html=True,
         )
-        st.download_button(
-            label="Download selected to ZIP",
-            data=st.session_state["export_zip_bytes"],
-            file_name=st.session_state["export_zip_name"],
-            mime="application/zip",
-            use_container_width=True,
-        )
+
+        zip_path = Path(st.session_state["export_zip_path"])
+
+        if zip_path.exists():
+            with open(zip_path, "rb") as zip_file:
+                st.download_button(
+                    label="Download selected to ZIP",
+                    data=zip_file,
+                    file_name=st.session_state["export_zip_name"],
+                    mime="application/zip",
+                    width="stretch",
+                )
+        else:
+            st.error("ZIP file is no longer available. Please run the export again.")
 
 
 # =========================================================
